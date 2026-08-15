@@ -86,3 +86,19 @@ fn watermark_persists_across_reopen() {
     let index = KeywordIndex::open_or_create(&dir.0).unwrap();
     assert_eq!(index.watermark(), 42);
 }
+
+#[test]
+fn reset_discards_everything() {
+    let dir = TempDir(temp_index_dir("reset"));
+    let mut index = KeywordIndex::open_or_create(&dir.0).unwrap();
+    let fact_id = Uuid::from_u128(1);
+    index.insert(fact_id, "content to be discarded", &[]).unwrap();
+    index.commit().unwrap();
+    index.set_watermark(9).unwrap();
+    assert_eq!(index.search("discarded", 5).unwrap()[0].0, fact_id);
+
+    index.reset().unwrap();
+
+    assert_eq!(index.watermark(), 0);
+    assert!(index.search("discarded", 5).unwrap().is_empty());
+}

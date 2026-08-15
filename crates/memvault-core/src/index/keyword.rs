@@ -149,4 +149,13 @@ impl KeywordIndex {
         std::fs::write(&self.watermark_path, seq.to_le_bytes())?;
         Ok(())
     }
+
+    /// Discards every document and resets the watermark to 0. Used by
+    /// recovery when the watermark is in an impossible state and this
+    /// index cannot be trusted incrementally.
+    pub fn reset(&mut self) -> Result<(), IndexError> {
+        self.writer.delete_all_documents().map_err(|e| IndexError::Tantivy(e.to_string()))?;
+        self.commit()?;
+        self.set_watermark(0)
+    }
 }

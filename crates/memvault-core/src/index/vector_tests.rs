@@ -89,3 +89,27 @@ fn test_insert_remove_search_roundtrip() {
     let results = index.search(&vector_for(50), 1).unwrap();
     assert_eq!(results[0].0, still_present);
 }
+
+#[test]
+fn reset_discards_everything_and_accepts_a_new_dimensionality() {
+    let path = TempPath(temp_index_path("reset"));
+    let mut index = VectorIndex::open_or_create(&path.0, &fingerprint()).unwrap();
+    index.insert(Uuid::from_u128(1), &vector_for(1)).unwrap();
+    index.set_watermark(9).unwrap();
+
+    let new_fingerprint = ModelFingerprint {
+        name: "different-model".into(),
+        dimensions: 16,
+        revision_hash: [2u8; 32],
+    };
+    index.reset(&new_fingerprint).unwrap();
+
+    assert_eq!(index.watermark(), 0);
+    assert_eq!(index.fingerprint(), &new_fingerprint);
+    // The old, lower-dimensional vector is gone; a query at the new
+    // dimensionality finds nothing (nothing was ever inserted since reset).
+    let results = index.search(&vec![0.0; 16], 5).unwrap();
+    assert!(results.is_empty());
+    // And inserting at the new dimensionality works.
+    index.insert(Uuid::from_u128(2), &vec![1.0; 16]).unwrap();
+}

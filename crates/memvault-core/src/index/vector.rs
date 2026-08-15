@@ -43,6 +43,18 @@ fn encode_fingerprint(fp: &ModelFingerprint) -> Vec<u8> {
     bytes
 }
 
+fn usearch_options(fingerprint: &ModelFingerprint) -> IndexOptions {
+    IndexOptions {
+        dimensions: fingerprint.dimensions as usize,
+        metric: MetricKind::Cos,
+        quantization: ScalarKind::F32,
+        connectivity: 0,
+        expansion_add: 0,
+        expansion_search: 0,
+        multi: false,
+    }
+}
+
 fn decode_fingerprint(bytes: &[u8]) -> Result<ModelFingerprint, IndexError> {
     if bytes.len() < 36 {
         return Err(IndexError::Corrupt("fingerprint sidecar entry too short".into()));
@@ -85,16 +97,7 @@ impl VectorIndex {
             let path_str = path.to_str().ok_or_else(|| IndexError::Corrupt("index path is not valid utf-8".into()))?;
             UsearchIndex::restore(path_str)?
         } else {
-            let options = IndexOptions {
-                dimensions: fingerprint.dimensions as usize,
-                metric: MetricKind::Cos,
-                quantization: ScalarKind::F32,
-                connectivity: 0,
-                expansion_add: 0,
-                expansion_search: 0,
-                multi: false,
-            };
-            UsearchIndex::new(&options)?
+            UsearchIndex::new(&usearch_options(fingerprint))?
         };
         // usearch's restored capacity exactly matches what was saved, with
         // no headroom for new inserts -- reserve some regardless of
@@ -254,5 +257,30 @@ impl VectorIndex {
 
     pub fn fingerprint(&self) -> &ModelFingerprint {
         &self.fingerprint
+    }
+
+    /// Discards every vector and the fact_id<->key mapping, rebuilds the
+    /// graph fresh under `new_fingerprint` (which may have different
+    /// dimensions), and resets the watermark to 0. Used by recovery when
+    /// the stored fingerprint no longer matches what the caller expects,
+    /// or the watermark is in an impossible state -- both mean "this
+    /// index cannot be trusted incrementally, start over."
+    pub fn reset(&mut self, new_fingerprint: &ModelFingerprint) -> Result<(), IndexError> {
+        self.index = UsearchIndex::new(&usearch_options(new_fingerprint))?;
+        self.index.reserve(RESERVE_HEADROOM)?;
+
+        let write_txn = self.meta_db.begin_write()?;
+        {
+            let mut forward = write_txn.open_table(FORWARD_TABLE)?;
+            forward.retain(|_, _| false)?;
+            let mut reverse = write_txn.open_table(REVERSE_TABLE)?;
+            reverse.retain(|_, _| false)?;
+        }
+        write_txn.commit()?;
+
+        self.fingerprint = new_fingerprint.clone();
+        self.persist_fingerprint()?;
+        self.set_watermark(0)?;
+        self.save()
     }
 }
