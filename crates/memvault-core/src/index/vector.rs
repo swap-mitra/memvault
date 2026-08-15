@@ -241,9 +241,12 @@ impl VectorIndex {
     }
 
     /// Records how far this index has been brought forward relative to the
-    /// ledger (product doc §6.6's `last_applied_seq`). Not in the plan's
-    /// original interface sketch, but recovery (a later task) needs it
-    /// persisted, not just held in memory.
+    /// ledger (product doc §6.6's `last_applied_seq`). Exclusive: the seq
+    /// that would be applied *next*, so a fully caught-up index has
+    /// `watermark() == ledger.head()` -- the same count semantics
+    /// `Ledger::head()` already uses, so recovery can compare them
+    /// directly. Not in the plan's original interface sketch, but
+    /// recovery needs it persisted, not just held in memory.
     pub fn set_watermark(&mut self, seq: u64) -> Result<(), IndexError> {
         self.watermark = seq;
         let write_txn = self.meta_db.begin_write()?;

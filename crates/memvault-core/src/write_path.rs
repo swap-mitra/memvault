@@ -150,12 +150,13 @@ pub fn write_fact(ledger: &Ledger, indexes: &mut Indexes, keyring: &mut Keyring,
     indexes.keyword.insert(fact_id, &content_text, &input.keywords)?;
     indexes.keyword.commit()?;
 
-    // Advances each index's watermark past both the Supersede (if any)
-    // and this Assert -- the seq their combined effect has now been
-    // applied through. This is what recovery (recovery.rs) uses to tell
-    // how far behind an index really fell after an interrupted write.
-    indexes.vector.set_watermark(outcome.assert_seq)?;
-    indexes.keyword.set_watermark(outcome.assert_seq)?;
+    // Watermark is exclusive -- "next seq needed" -- matching
+    // Ledger::head()'s own count semantics, so recovery can compare them
+    // directly (caught up iff watermark == head). assert_seq + 1 advances
+    // past both the Supersede (if any) and this Assert, the seq their
+    // combined effect has now been applied through.
+    indexes.vector.set_watermark(outcome.assert_seq + 1)?;
+    indexes.keyword.set_watermark(outcome.assert_seq + 1)?;
 
     Ok(fact_id)
 }
