@@ -7,6 +7,7 @@ pub mod index;
 pub mod ledger;
 pub mod read_path;
 pub mod record;
+pub mod working_set;
 pub mod write_path;
 
 #[cfg(test)]
@@ -32,4 +33,5 @@ pub use record::{
     Assert, Checkpoint, DecodeError, Encrypted, Erase, Explanation, ModelFingerprint, NamespaceId,
     Outcome, Payload, Record, RecordHeader, RecordKind, Retrieval, SourceRef, Supersede,
 };
+pub use working_set::{SessionHandle, SessionId, SessionState, WorkingSet};
 pub use write_path::{write_fact, WriteError, WriteInput};
