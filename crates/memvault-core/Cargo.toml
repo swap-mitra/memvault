@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 blake3 = "1.8.6"
+chacha20poly1305 = "0.11.0"
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 redb = "4.1.0"
 uuid = "1.24.1"
