@@ -5,7 +5,7 @@ use chrono::{Duration, Utc};
 use uuid::Uuid;
 
 use crate::crypto::Keyring;
-use crate::explain::search;
+use crate::explain::{explain, search};
 use crate::index::{Indexes, KeywordIndex, VectorIndex};
 use crate::ledger::Ledger;
 use crate::read_path::Query;
@@ -133,4 +133,32 @@ fn test_explanation_includes_all_outcomes() {
         crate::record::Payload::Retrieval(ret) => assert_eq!(ret.candidates.len(), 4),
         _ => unreachable!(),
     }
+}
+
+#[test]
+fn explain_reconstructs_a_past_retrieval_exactly() {
+    let mut h = harness("explain-roundtrip");
+    write(&mut h, "hello", vec![1.0, 0.0, 0.0, 0.0], Utc::now(), None);
+    h.indexes.keyword.commit().unwrap();
+
+    let query = Query {
+        text: Some("hello".into()),
+        embedding: Some(vec![1.0, 0.0, 0.0, 0.0]),
+        embedding_model: None,
+        namespace: NamespaceId("default".into()),
+        as_of: None,
+        k: 5,
+        max_tokens: 4096,
+    };
+    let (original, retrieval_id) = search(&h.ledger, &h.indexes, query).unwrap();
+
+    let reconstructed = explain(&h.ledger, retrieval_id).unwrap();
+    assert_eq!(reconstructed, original);
+}
+
+#[test]
+fn explain_unknown_retrieval_id_is_not_found() {
+    let h = harness("explain-not-found");
+    let result = explain(&h.ledger, Uuid::new_v4());
+    assert!(matches!(result, Err(crate::explain::ExplainError::NotFound)));
 }

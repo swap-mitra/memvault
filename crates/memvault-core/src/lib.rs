@@ -24,7 +24,7 @@ pub use budget::{pack_to_budget, PackedCandidate, SkippedCandidate};
 pub use chain::{record_hash, verify_chain, ChainError};
 pub use crypto::{content_hash, DecryptError, Keyring, KeyringError};
 pub use decay::{apply_decay, decay_weight, DecayConfig, ScoredCandidate};
-pub use explain::search;
+pub use explain::{explain, search, ExplainError};
 pub use index::{IndexError, Indexes, KeywordIndex, VectorIndex};
 pub use ledger::{Ledger, LedgerError, VerifyError, WriteAssertOutcome};
 pub use read_path::{hybrid_search, FusedCandidate, Query, SearchError};

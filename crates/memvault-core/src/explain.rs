@@ -208,3 +208,35 @@ pub fn search(ledger: &Ledger, indexes: &Indexes, query: Query) -> Result<(Vec<E
 
     Ok((explanations, retrieval_id))
 }
+
+#[derive(Debug)]
+pub enum ExplainError {
+    Ledger(LedgerError),
+    NotFound,
+}
+
+impl std::fmt::Display for ExplainError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExplainError::Ledger(e) => write!(f, "{e}"),
+            ExplainError::NotFound => write!(f, "no retrieval with that id in the ledger"),
+        }
+    }
+}
+
+impl std::error::Error for ExplainError {}
+
+/// Reconstructs a past retrieval exactly from its `Retrieval` ledger
+/// record. A linear scan: fine at the ledger sizes this project targets,
+/// and there's no retrieval_id index yet to do better with.
+pub fn explain(ledger: &Ledger, retrieval_id: Uuid) -> Result<Vec<Explanation>, ExplainError> {
+    for record in ledger.scan_from(0).map_err(ExplainError::Ledger)? {
+        let record = record.map_err(ExplainError::Ledger)?;
+        if let Payload::Retrieval(r) = record.payload {
+            if r.retrieval_id == retrieval_id {
+                return Ok(r.candidates);
+            }
+        }
+    }
+    Err(ExplainError::NotFound)
+}
