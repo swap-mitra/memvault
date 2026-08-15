@@ -1,0 +1,12 @@
+[package]
+name = "memvault-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "memvault"
+path = "src/main.rs"
+
+[dependencies]
+memvault-core = { path = "../memvault-core" }

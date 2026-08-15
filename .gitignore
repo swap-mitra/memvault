@@ -1,0 +1,17 @@
+# agent-facing planning docs, not part of the shipped project
+/docs/
+
+# Rust
+/target/
+**/target/
+
+# local scratch / data dirs used by demo scripts
+/demo/data/
+*.ledger
+keys.db
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

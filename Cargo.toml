@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/memvault-core",
+    "crates/memvault-server",
+    "crates/memvault-ffi",
+    "crates/memvault-cli",
+    "crates/memvault-bench",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
