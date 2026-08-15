@@ -10,6 +10,9 @@
 *.ledger
 keys.db
 
+# Claude Code local runtime state
+/.claude/
+
 # OS/editor
 .DS_Store
 Thumbs.db

@@ -1,14 +1,11 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod chain;
+pub mod record;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod chain_tests;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use chain::{record_hash, verify_chain, ChainError};
+pub use record::{
+    Assert, Checkpoint, Encrypted, Erase, Explanation, ModelFingerprint, NamespaceId, Outcome,
+    Payload, Record, RecordHeader, RecordKind, Retrieval, SourceRef, Supersede,
+};
