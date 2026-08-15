@@ -134,7 +134,7 @@ pub fn write_fact(ledger: &Ledger, indexes: &mut Indexes, keyring: &mut Keyring,
         source: input.source,
     };
 
-    ledger.write_assert(input.namespace, Utc::now(), assert)?;
+    let outcome = ledger.write_assert(input.namespace, Utc::now(), assert)?;
 
     // Post-commit, outside the ledger transaction (see module doc). Remove
     // first: idempotent no-op for a brand new fact_id, and correctly
@@ -149,6 +149,13 @@ pub fn write_fact(ledger: &Ledger, indexes: &mut Indexes, keyring: &mut Keyring,
     let content_text = String::from_utf8_lossy(&input.content);
     indexes.keyword.insert(fact_id, &content_text, &input.keywords)?;
     indexes.keyword.commit()?;
+
+    // Advances each index's watermark past both the Supersede (if any)
+    // and this Assert -- the seq their combined effect has now been
+    // applied through. This is what recovery (recovery.rs) uses to tell
+    // how far behind an index really fell after an interrupted write.
+    indexes.vector.set_watermark(outcome.assert_seq)?;
+    indexes.keyword.set_watermark(outcome.assert_seq)?;
 
     Ok(fact_id)
 }
