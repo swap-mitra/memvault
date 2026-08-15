@@ -56,6 +56,14 @@ fn decode_fingerprint(bytes: &[u8]) -> Result<ModelFingerprint, IndexError> {
 
 pub struct VectorIndex {
     index: UsearchIndex,
+    /// ponytail: usearch has no mmap-backed live-writable file like
+    /// tantivy's; every mutation re-serializes the whole graph to
+    /// `index_path` so it survives a process restart, which is O(graph
+    /// size) per write. Fine at the corpus sizes this project targets so
+    /// far; upgrade path is a periodic/batched save (e.g. only on an
+    /// explicit flush or process shutdown) if that cost is ever measured
+    /// and matters.
+    index_path: PathBuf,
     meta_db: redb::Database,
     fingerprint: ModelFingerprint,
     watermark: u64,
@@ -111,11 +119,26 @@ impl VectorIndex {
             (watermark, fp)
         };
 
-        let this = VectorIndex { index, meta_db, fingerprint: stored_fingerprint, watermark };
+        let this = VectorIndex {
+            index,
+            index_path: path.to_path_buf(),
+            meta_db,
+            fingerprint: stored_fingerprint,
+            watermark,
+        };
         if !exists {
             this.persist_fingerprint()?;
         }
         Ok(this)
+    }
+
+    fn save(&self) -> Result<(), IndexError> {
+        let path_str = self
+            .index_path
+            .to_str()
+            .ok_or_else(|| IndexError::Corrupt("index path is not valid utf-8".into()))?;
+        self.index.save(path_str)?;
+        Ok(())
     }
 
     fn persist_fingerprint(&self) -> Result<(), IndexError> {
@@ -167,7 +190,7 @@ impl VectorIndex {
         write_txn.commit()?;
 
         self.index.add(key, embedding)?;
-        Ok(())
+        self.save()
     }
 
     pub fn remove(&mut self, fact_id: Uuid) -> Result<(), IndexError> {
@@ -186,6 +209,7 @@ impl VectorIndex {
 
         if let Some(key) = key {
             self.index.remove(key)?;
+            self.save()?;
         }
         Ok(())
     }
