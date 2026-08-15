@@ -3,6 +3,7 @@
 //! proof that hybrid retrieval, decay, pinning, and budget cuts all work
 //! end to end, calling memvault-core directly with no server in between.
 
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -12,7 +13,7 @@ use uuid::Uuid;
 
 use memvault_core::{
     explain, search, write_fact, Explanation, Indexes, KeywordIndex, Keyring, Ledger,
-    ModelFingerprint, NamespaceId, Query, SourceRef, VectorIndex, WriteInput,
+    ModelFingerprint, NamespaceId, Outcome, Query, SourceRef, VectorIndex, WriteInput,
 };
 
 const EMBEDDING_DIMENSIONS: u32 = 32;
@@ -110,14 +111,48 @@ fn open_stores(data_dir: &Path) -> Result<Stores, Box<dyn std::error::Error>> {
     Ok(Stores { ledger, keyring, indexes: Indexes { vector, keyword } })
 }
 
+/// True only for a real terminal with color not explicitly disabled
+/// (the NO_COLOR convention, https://no-color.org). Piping the CLI's
+/// output -- as demo/run_demo_1.sh does, with `awk`/`grep` against exact
+/// column text -- must never see escape codes, so this gates every color
+/// call site rather than being applied unconditionally.
+fn color_enabled() -> bool {
+    std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none()
+}
+
+/// Wraps already-width-padded text in an ANSI SGR code, so alignment is
+/// computed on the plain text first and the escape bytes never throw off
+/// column widths.
+fn colorize(padded_text: &str, sgr_code: &str, enabled: bool) -> String {
+    if enabled {
+        format!("\x1b[{sgr_code}m{padded_text}\x1b[0m")
+    } else {
+        padded_text.to_string()
+    }
+}
+
+fn outcome_sgr_code(outcome: Outcome) -> &'static str {
+    use Outcome::*;
+    match outcome {
+        Injected => "32",       // green: made it into the response
+        CutByBudget | CutByK => "33", // yellow: relevant, but trimmed
+        FilteredByTime => "2",  // dim: no longer valid at query time
+    }
+}
+
 fn print_explanations(explanations: &[Explanation]) {
-    println!(
+    let color = color_enabled();
+    let header = format!(
         "{:<36} {:>8} {:>10} {:>8} {:>10} {:>9} {:>9} {:>9} {:>13} {:>6}",
         "fact_id", "ann_rank", "ann_dist", "bm25_rk", "bm25_score", "rrf", "decay_wt", "final", "outcome", "tokens"
     );
+    println!("{}", colorize(&header, "1", color)); // bold
+
     for e in explanations {
+        let outcome_padded = format!("{:>13}", format!("{:?}", e.outcome));
+        let outcome_field = colorize(&outcome_padded, outcome_sgr_code(e.outcome), color);
         println!(
-            "{:<36} {:>8} {:>10} {:>8} {:>10} {:>9.4} {:>9.4} {:>9.4} {:>13} {:>6}",
+            "{:<36} {:>8} {:>10} {:>8} {:>10} {:>9.4} {:>9.4} {:>9.4} {outcome_field} {:>6}",
             e.fact_id,
             e.ann_rank.map(|r| r.to_string()).unwrap_or_else(|| "-".into()),
             e.ann_distance.map(|d| format!("{d:.4}")).unwrap_or_else(|| "-".into()),
@@ -126,7 +161,6 @@ fn print_explanations(explanations: &[Explanation]) {
             e.rrf_score,
             e.decay_weight,
             e.final_score,
-            format!("{:?}", e.outcome),
             e.token_cost,
         );
     }
@@ -197,5 +231,27 @@ fn main() -> ExitCode {
             eprintln!("error: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn colorize_wraps_in_ansi_when_enabled() {
+        assert_eq!(colorize("Injected", "32", true), "\x1b[32mInjected\x1b[0m");
+    }
+
+    #[test]
+    fn colorize_is_a_no_op_when_disabled() {
+        assert_eq!(colorize("Injected", "32", false), "Injected");
+    }
+
+    #[test]
+    fn each_outcome_has_a_distinct_sgr_code_except_the_two_cut_variants() {
+        assert_eq!(outcome_sgr_code(Outcome::Injected), "32");
+        assert_eq!(outcome_sgr_code(Outcome::CutByBudget), outcome_sgr_code(Outcome::CutByK));
+        assert_ne!(outcome_sgr_code(Outcome::Injected), outcome_sgr_code(Outcome::FilteredByTime));
     }
 }
