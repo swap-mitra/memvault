@@ -22,6 +22,11 @@ use std::collections::HashMap;
 /// Constant from Cormack et al., used by product doc §6.4's RRF step.
 const RRF_K: f32 = 60.0;
 
+/// How much wider than `k` each underlying index search casts its net, so
+/// post-fusion filtering (bitemporal, decay-based top-k, budget) has real
+/// candidates to work with instead of ones already truncated away.
+const POOL_BREADTH_FACTOR: usize = 4;
+
 pub struct Query {
     pub text: Option<String>,
     pub embedding: Option<Vec<f32>>,
@@ -89,12 +94,19 @@ pub fn hybrid_search(indexes: &Indexes, query: &Query) -> Result<Vec<FusedCandid
         }
     }
 
+    // Search a wider pool than `k`: callers apply bitemporal filtering,
+    // decay, and their own top-k cut *after* fusion, and need candidates
+    // that would rank below the final cutoff pre-filtering to still show
+    // up (e.g. as CutByK) rather than having been truncated away here,
+    // one layer too early, with no trace.
+    let pool_size = query.k.saturating_mul(POOL_BREADTH_FACTOR).max(query.k);
+
     let ann_results = match &query.embedding {
-        Some(embedding) => indexes.vector.search(embedding, query.k)?,
+        Some(embedding) => indexes.vector.search(embedding, pool_size)?,
         None => Vec::new(),
     };
     let bm25_results = match &query.text {
-        Some(text) => indexes.keyword.search(text, query.k)?,
+        Some(text) => indexes.keyword.search(text, pool_size)?,
         None => Vec::new(),
     };
 

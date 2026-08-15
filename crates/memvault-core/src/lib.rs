@@ -1,5 +1,8 @@
+pub mod budget;
 pub mod chain;
 pub mod crypto;
+pub mod decay;
+pub mod explain;
 pub mod index;
 pub mod ledger;
 pub mod read_path;
@@ -9,14 +12,19 @@ pub mod write_path;
 #[cfg(test)]
 mod chain_tests;
 #[cfg(test)]
+mod explain_tests;
+#[cfg(test)]
 mod ledger_tests;
 #[cfg(test)]
 mod read_path_tests;
 #[cfg(test)]
 mod write_path_tests;
 
+pub use budget::{pack_to_budget, PackedCandidate, SkippedCandidate};
 pub use chain::{record_hash, verify_chain, ChainError};
 pub use crypto::{content_hash, DecryptError, Keyring, KeyringError};
+pub use decay::{apply_decay, decay_weight, DecayConfig, ScoredCandidate};
+pub use explain::search;
 pub use index::{IndexError, Indexes, KeywordIndex, VectorIndex};
 pub use ledger::{Ledger, LedgerError, VerifyError, WriteAssertOutcome};
 pub use read_path::{hybrid_search, FusedCandidate, Query, SearchError};
