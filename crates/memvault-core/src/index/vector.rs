@@ -22,6 +22,11 @@ const FORWARD_TABLE: TableDefinition<&[u8], u64> = TableDefinition::new("forward
 const REVERSE_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("reverse");
 const META_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("meta");
 
+/// Free capacity kept above the current size after open, since usearch
+/// gives a restored index exactly the capacity it was saved with -- zero
+/// headroom for the very next insert.
+const RESERVE_HEADROOM: usize = 1024;
+
 /// `<path>` gains a suffix rather than replacing its extension, so any
 /// extension the caller chose for the usearch file survives.
 fn sidecar_path(path: &Path, suffix: &str) -> PathBuf {
@@ -81,10 +86,12 @@ impl VectorIndex {
                 expansion_search: 0,
                 multi: false,
             };
-            let index = UsearchIndex::new(&options)?;
-            index.reserve(1024)?;
-            index
+            UsearchIndex::new(&options)?
         };
+        // usearch's restored capacity exactly matches what was saved, with
+        // no headroom for new inserts -- reserve some regardless of
+        // whether this index was just created or just restored.
+        index.reserve(index.size() + RESERVE_HEADROOM)?;
 
         let (watermark, stored_fingerprint) = {
             let read_txn = meta_db.begin_read()?;
