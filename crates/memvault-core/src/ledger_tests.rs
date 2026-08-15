@@ -37,9 +37,9 @@ fn fingerprint() -> ModelFingerprint {
     }
 }
 
-fn assert_payload(tag: u64) -> Payload {
-    Payload::Assert(Assert {
-        fact_id: Uuid::from_u128(tag as u128),
+fn assert_value(fact_id: Uuid, tag: u64) -> Assert {
+    Assert {
+        fact_id,
         valid_from: Utc::now(),
         valid_to: None,
         content: Encrypted {
@@ -52,7 +52,11 @@ fn assert_payload(tag: u64) -> Payload {
         keywords: vec![],
         pinned: false,
         source: SourceRef::default(),
-    })
+    }
+}
+
+fn assert_payload(tag: u64) -> Payload {
+    Payload::Assert(assert_value(Uuid::from_u128(tag as u128), tag))
 }
 
 #[test]
@@ -139,4 +143,69 @@ fn test_concurrent_read_during_write() {
         let max_seen = reader.join().unwrap();
         assert_eq!(max_seen, Some(N - 1), "reader did not eventually observe the last written seq");
     }
+}
+
+#[test]
+fn write_assert_first_write_has_no_supersession() {
+    let path = TempPath(temp_ledger_path("write-assert-first"));
+    let ledger = Ledger::open(&path.0).unwrap();
+    let fact_id = Uuid::from_u128(1);
+
+    let outcome = ledger
+        .write_assert(NamespaceId("default".into()), Utc::now(), assert_value(fact_id, 1))
+        .unwrap();
+
+    assert_eq!(outcome, crate::ledger::WriteAssertOutcome { assert_seq: 0, superseded_seq: None });
+    assert_eq!(ledger.open_assert_seq(fact_id), Some(0));
+}
+
+#[test]
+fn write_assert_with_same_fact_id_supersedes() {
+    let path = TempPath(temp_ledger_path("write-assert-supersede"));
+    let ledger = Ledger::open(&path.0).unwrap();
+    let fact_id = Uuid::from_u128(1);
+
+    let first = ledger
+        .write_assert(NamespaceId("default".into()), Utc::now(), assert_value(fact_id, 1))
+        .unwrap();
+    let second = ledger
+        .write_assert(NamespaceId("default".into()), Utc::now(), assert_value(fact_id, 2))
+        .unwrap();
+
+    assert_eq!(first.superseded_seq, None);
+    assert_eq!(second.superseded_seq, Some(first.assert_seq));
+    assert_eq!(ledger.open_assert_seq(fact_id), Some(second.assert_seq));
+
+    // A Supersede record was appended between the two Asserts, closing the
+    // first one's interval.
+    let supersede_record = ledger.read(first.assert_seq + 1).unwrap().unwrap();
+    match supersede_record.payload {
+        Payload::Supersede(s) => {
+            assert_eq!(s.fact_id, fact_id);
+            assert_eq!(s.target_seq, first.assert_seq);
+        }
+        other => panic!("expected a Supersede record, got {other:?}"),
+    }
+
+    ledger.verify().unwrap();
+}
+
+#[test]
+fn open_facts_cache_survives_reopen() {
+    let path = TempPath(temp_ledger_path("write-assert-reopen"));
+    let fact_id = Uuid::from_u128(1);
+    {
+        let ledger = Ledger::open(&path.0).unwrap();
+        ledger
+            .write_assert(NamespaceId("default".into()), Utc::now(), assert_value(fact_id, 1))
+            .unwrap();
+        ledger
+            .write_assert(NamespaceId("default".into()), Utc::now(), assert_value(fact_id, 2))
+            .unwrap();
+    }
+
+    // Reopening replays the ledger to rebuild open_facts from scratch.
+    // Records: seq 0 = first Assert, seq 1 = Supersede, seq 2 = second Assert.
+    let ledger = Ledger::open(&path.0).unwrap();
+    assert_eq!(ledger.open_assert_seq(fact_id), Some(2));
 }

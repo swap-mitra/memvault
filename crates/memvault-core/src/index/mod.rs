@@ -15,6 +15,13 @@ mod vector_tests;
 pub use keyword::KeywordIndex;
 pub use vector::VectorIndex;
 
+/// The two derived, rebuildable-from-the-ledger indexes bundled together,
+/// since every caller of the read/write paths needs both at once.
+pub struct Indexes {
+    pub vector: VectorIndex,
+    pub keyword: KeywordIndex,
+}
+
 #[derive(Debug)]
 pub enum IndexError {
     Usearch(cxx::Exception),
