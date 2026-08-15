@@ -7,6 +7,7 @@ pub mod index;
 pub mod ledger;
 pub mod read_path;
 pub mod record;
+pub mod recovery;
 pub mod working_set;
 pub mod write_path;
 
@@ -19,6 +20,8 @@ mod ledger_tests;
 #[cfg(test)]
 mod read_path_tests;
 #[cfg(test)]
+mod recovery_tests;
+#[cfg(test)]
 mod write_path_tests;
 
 pub use budget::{pack_to_budget, PackedCandidate, SkippedCandidate};
@@ -29,6 +32,7 @@ pub use explain::{explain, search, ExplainError};
 pub use index::{IndexError, Indexes, KeywordIndex, VectorIndex};
 pub use ledger::{Ledger, LedgerError, VerifyError, WriteAssertOutcome};
 pub use read_path::{hybrid_search, FusedCandidate, Query, SearchError};
+pub use recovery::{recover, IndexKind, RecoveryConfig, RecoveryError, RecoveryReport};
 pub use record::{
     Assert, Checkpoint, DecodeError, Encrypted, Erase, Explanation, ModelFingerprint, NamespaceId,
     Outcome, Payload, Record, RecordHeader, RecordKind, Retrieval, SourceRef, Supersede,
