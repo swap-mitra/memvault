@@ -1,3 +1,208 @@
-fn main() {
-    println!("Hello, world!");
+//! MCP server exposing `memory_write` and `memory_search` over stdio.
+//! Stdout is the protocol channel; only stderr is used for logging.
+
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use rmcp::{
+    ServerHandler, ServiceExt,
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+    model::{ServerCapabilities, ServerInfo},
+    tool, tool_handler, tool_router,
+};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use memvault_core::{
+    explain, recover, write_fact, Explanation, Indexes, KeywordIndex, Keyring, Ledger,
+    ModelFingerprint, NamespaceId, Query, RecoveryConfig, SourceRef, VectorIndex, WriteInput,
+};
+
+/// No namespace config loader exists yet (same placeholder the CLI uses),
+/// so every namespace shares one fixed embedding dimensionality. 1536
+/// matches common embedding APIs closely enough to be a reasonable
+/// default until real per-namespace config exists.
+const EMBEDDING_DIMENSIONS: u32 = 1536;
+
+fn fingerprint() -> ModelFingerprint {
+    ModelFingerprint {
+        name: "caller-supplied".into(),
+        dimensions: EMBEDDING_DIMENSIONS,
+        revision_hash: [0u8; 32],
+    }
+}
+
+fn default_k() -> usize {
+    10
+}
+
+fn default_max_tokens() -> u32 {
+    2048
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct WriteParams {
+    namespace: String,
+    content: String,
+    /// Caller-supplied embedding; must match the server's configured
+    /// dimensionality if present. Omit for a text-only fact.
+    #[serde(default)]
+    embedding: Option<Vec<f32>>,
+    #[serde(default)]
+    pinned: bool,
+    /// Supersedes this fact's currently-open version instead of asserting
+    /// a new one, if set.
+    #[serde(default)]
+    fact_id: Option<String>,
+    #[serde(default)]
+    keywords: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct SearchParams {
+    namespace: String,
+    #[serde(default)]
+    query: Option<String>,
+    #[serde(default)]
+    embedding: Option<Vec<f32>>,
+    #[serde(default = "default_k")]
+    k: usize,
+    #[serde(default = "default_max_tokens")]
+    max_tokens: u32,
+}
+
+fn format_explanations(retrieval_id: Uuid, explanations: &[Explanation]) -> String {
+    let mut out = format!("retrieval_id: {retrieval_id}\n");
+    out.push_str(
+        "fact_id                              ann_rank   ann_dist  bm25_rk bm25_score       rrf  decay_wt     final       outcome tokens\n",
+    );
+    for e in explanations {
+        out.push_str(&format!(
+            "{:<36} {:>8} {:>10} {:>8} {:>10} {:>9.4} {:>9.4} {:>9.4} {:>13} {:>6}\n",
+            e.fact_id,
+            e.ann_rank.map(|r| r.to_string()).unwrap_or_else(|| "-".into()),
+            e.ann_distance.map(|d| format!("{d:.4}")).unwrap_or_else(|| "-".into()),
+            e.bm25_rank.map(|r| r.to_string()).unwrap_or_else(|| "-".into()),
+            e.bm25_score.map(|s| format!("{s:.4}")).unwrap_or_else(|| "-".into()),
+            e.rrf_score,
+            e.decay_weight,
+            e.final_score,
+            format!("{:?}", e.outcome),
+            e.token_cost,
+        ));
+    }
+    out
+}
+
+struct Stores {
+    ledger: Ledger,
+    keyring: Mutex<Keyring>,
+    /// ponytail: one lock over both indexes together, not the doc's
+    /// eventual per-index RwLock scheme (§6.7) -- correct and simple for
+    /// Phase 0's single-connection stdio server; upgrade path is splitting
+    /// this once concurrent multi-client throughput is actually a
+    /// bottleneck worth measuring.
+    indexes: Mutex<Indexes>,
+}
+
+impl Stores {
+    fn open(data_dir: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        std::fs::create_dir_all(data_dir)?;
+        let ledger = Ledger::open(&data_dir.join("ledger.redb"))?;
+        let keyring = Keyring::open(&data_dir.join("keys.redb"))?;
+        let vector = VectorIndex::open_or_create(&data_dir.join("vectors.usearch"), &fingerprint())?;
+        let keyword = KeywordIndex::open_or_create(&data_dir.join("keyword"))?;
+        let mut indexes = Indexes { vector, keyword };
+
+        let report = recover(&ledger, &mut indexes, &keyring, &fingerprint(), RecoveryConfig { verify_chain: true })?;
+        eprintln!("memvault-server: recovery report: {report:?}");
+
+        Ok(Stores { ledger, keyring: Mutex::new(keyring), indexes: Mutex::new(indexes) })
+    }
+}
+
+#[derive(Clone)]
+struct MemVaultServer {
+    stores: Arc<Stores>,
+    tool_router: ToolRouter<Self>,
+}
+
+impl MemVaultServer {
+    fn open(data_dir: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(MemVaultServer { stores: Arc::new(Stores::open(data_dir)?), tool_router: Self::tool_router() })
+    }
+}
+
+#[tool_router(router = tool_router)]
+impl MemVaultServer {
+    #[tool(name = "memory_write", description = "Assert a fact, with optional embedding and pin")]
+    async fn memory_write(&self, Parameters(params): Parameters<WriteParams>) -> Result<String, String> {
+        let fact_id = params
+            .fact_id
+            .map(|s| Uuid::parse_str(&s))
+            .transpose()
+            .map_err(|e| format!("invalid fact_id: {e}"))?;
+
+        let mut keyring = self.stores.keyring.lock().unwrap();
+        let mut indexes = self.stores.indexes.lock().unwrap();
+        let written = write_fact(
+            &self.stores.ledger,
+            &mut indexes,
+            &mut keyring,
+            WriteInput {
+                namespace: NamespaceId(params.namespace),
+                content: params.content.into_bytes(),
+                embedding: params.embedding,
+                embedding_model: fingerprint(),
+                valid_from: chrono::Utc::now(),
+                valid_to: None,
+                fact_id,
+                keywords: params.keywords,
+                pinned: params.pinned,
+                source: SourceRef::default(),
+            },
+        )
+        .map_err(|e| e.to_string())?;
+
+        Ok(format!("fact_id: {written}"))
+    }
+
+    #[tool(name = "memory_search", description = "Hybrid search with full provenance for every candidate considered")]
+    async fn memory_search(&self, Parameters(params): Parameters<SearchParams>) -> Result<String, String> {
+        let indexes = self.stores.indexes.lock().unwrap();
+        let (explanations, retrieval_id) = explain::search(
+            &self.stores.ledger,
+            &indexes,
+            Query {
+                text: params.query,
+                embedding: params.embedding,
+                embedding_model: None,
+                namespace: NamespaceId(params.namespace),
+                as_of: None,
+                k: params.k,
+                max_tokens: params.max_tokens,
+            },
+        )
+        .map_err(|e| e.to_string())?;
+
+        Ok(format_explanations(retrieval_id, &explanations))
+    }
+}
+
+#[tool_handler(router = self.tool_router)]
+impl ServerHandler for MemVaultServer {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_instructions("MemVault: local-first memory engine for AI agents. Every write and retrieval is recorded in an append-only, hash-chained ledger.")
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let data_dir = std::env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("./memvault-data"));
+    let server = MemVaultServer::open(&data_dir)?;
+    let running = server.serve(rmcp::transport::stdio()).await?;
+    running.waiting().await?;
+    Ok(())
 }
