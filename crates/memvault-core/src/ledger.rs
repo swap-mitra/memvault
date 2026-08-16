@@ -26,7 +26,7 @@ use redb::{ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefiniti
 use uuid::Uuid;
 
 use crate::chain;
-use crate::record::{self, Assert, DecodeError, NamespaceId, Payload, Record, Supersede};
+use crate::record::{self, Assert, DecodeError, Erase, NamespaceId, Payload, Record, Supersede};
 
 const RECORDS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("records");
 
@@ -193,15 +193,14 @@ impl Ledger {
         Ok(WriteAssertOutcome { assert_seq, superseded_seq })
     }
 
-    /// Closes `fact_id`'s currently-open `Assert` with a `Supersede`,
-    /// without writing a new `Assert` -- product doc §9's mitigation for
-    /// caller-directed supersession, exposed standalone rather than only
-    /// as a side effect of `write_assert`. `None` if `fact_id` has no open
-    /// Assert. Holds `open_facts` for the whole operation, same reasoning
-    /// as `write_assert`'s module-doc comment. The closed record's own
-    /// namespace is reused (a caller closing an existing fact has no
-    /// independent namespace to supply).
-    pub fn write_supersede(&self, recorded_at: DateTime<Utc>, fact_id: Uuid, valid_to: DateTime<Utc>, reason: Option<String>) -> Result<Option<WriteSupersedeOutcome>, LedgerError> {
+    /// Shared by `write_supersede`/`write_erase`: both close `fact_id`'s
+    /// currently-open `Assert` by appending one record that references it
+    /// (a `Supersede` or an `Erase`), atomically under the fact-view lock
+    /// -- see the module doc comment. `None` if `fact_id` has no open
+    /// Assert. The closed record's own namespace is reused (a caller
+    /// closing an existing fact has no independent namespace to supply).
+    /// Returns the closed Assert's seq and the new record's seq.
+    fn close_open_fact(&self, recorded_at: DateTime<Utc>, fact_id: Uuid, build_payload: impl FnOnce(u64) -> Payload) -> Result<Option<(u64, u64)>, LedgerError> {
         let mut open_facts = self.open_facts.lock().unwrap();
         let Some(target_seq) = open_facts.get(&fact_id).copied() else {
             return Ok(None);
@@ -211,16 +210,30 @@ impl Ledger {
             .read(target_seq)?
             .expect("open_facts points at a seq that must exist in the ledger");
 
-        let seqs = self.append_batch(
-            target.header.namespace,
-            recorded_at,
-            vec![Payload::Supersede(Supersede { fact_id, target_seq, valid_to, reason })],
-        )?;
-        let supersede_seq = seqs[0];
+        let seqs = self.append_batch(target.header.namespace, recorded_at, vec![build_payload(target_seq)])?;
+        let closing_seq = seqs[0];
 
         open_facts.remove(&fact_id);
 
-        Ok(Some(WriteSupersedeOutcome { target_seq, supersede_seq }))
+        Ok(Some((target_seq, closing_seq)))
+    }
+
+    /// Closes `fact_id`'s currently-open `Assert` with a `Supersede`,
+    /// without writing a new `Assert` -- product doc §9's mitigation for
+    /// caller-directed supersession, exposed standalone rather than only
+    /// as a side effect of `write_assert`.
+    pub fn write_supersede(&self, recorded_at: DateTime<Utc>, fact_id: Uuid, valid_to: DateTime<Utc>, reason: Option<String>) -> Result<Option<WriteSupersedeOutcome>, LedgerError> {
+        let outcome = self.close_open_fact(recorded_at, fact_id, |target_seq| Payload::Supersede(Supersede { fact_id, target_seq, valid_to, reason }))?;
+        Ok(outcome.map(|(target_seq, supersede_seq)| WriteSupersedeOutcome { target_seq, supersede_seq }))
+    }
+
+    /// Appends an `Erase` record for `fact_id`'s currently-open `Assert`.
+    /// Product doc §6.5: recording the erasure is the ledger's part of the
+    /// job; destroying the key (making the ciphertext this record still
+    /// points at permanently unreadable) is the caller's, via `Keyring`.
+    pub fn write_erase(&self, recorded_at: DateTime<Utc>, fact_id: Uuid, reason: String) -> Result<Option<WriteEraseOutcome>, LedgerError> {
+        let outcome = self.close_open_fact(recorded_at, fact_id, |target_seq| Payload::Erase(Erase { fact_id, target_seq, reason }))?;
+        Ok(outcome.map(|(target_seq, erase_seq)| WriteEraseOutcome { target_seq, erase_seq }))
     }
 
     pub fn read(&self, seq: u64) -> Result<Option<Record>, LedgerError> {
@@ -267,6 +280,12 @@ pub struct WriteAssertOutcome {
 pub struct WriteSupersedeOutcome {
     pub target_seq: u64,
     pub supersede_seq: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WriteEraseOutcome {
+    pub target_seq: u64,
+    pub erase_seq: u64,
 }
 
 #[derive(Debug)]

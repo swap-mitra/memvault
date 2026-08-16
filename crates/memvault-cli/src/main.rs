@@ -12,9 +12,9 @@ use clap::{Parser, Subcommand};
 use uuid::Uuid;
 
 use memvault_core::{
-    explain, memory_as_of, search, supersede_fact, write_fact, AsOfQuery, Explanation, Indexes,
-    KeywordIndex, Keyring, Ledger, ModelFingerprint, NamespaceId, Outcome, Query, SourceRef,
-    VectorIndex, WriteInput,
+    erase, explain, memory_as_of, search, supersede_fact, write_fact, AsOfQuery, Explanation,
+    Indexes, KeywordIndex, Keyring, Ledger, ModelFingerprint, NamespaceId, Outcome, Query,
+    SourceRef, VectorIndex, WriteInput,
 };
 
 const EMBEDDING_DIMENSIONS: u32 = 32;
@@ -74,6 +74,14 @@ enum Command {
         valid_to: Option<chrono::DateTime<Utc>>,
         #[arg(long)]
         reason: Option<String>,
+    },
+    /// Cryptographically erase a fact: destroy its key so its content is
+    /// permanently unreadable, everywhere, forever. The ledger record
+    /// stays -- only its content becomes unrecoverable.
+    Forget {
+        fact_id: Uuid,
+        #[arg(long)]
+        reason: String,
     },
 }
 
@@ -253,6 +261,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let valid_to = valid_to.unwrap_or_else(Utc::now);
             supersede_fact(&stores.ledger, &mut stores.indexes, fact_id, valid_to, reason)?;
             println!("superseded fact_id: {fact_id}");
+        }
+        Command::Forget { fact_id, reason } => {
+            let mut stores = open_stores(&cli.data_dir)?;
+            erase(&stores.ledger, &mut stores.keyring, &mut stores.indexes, fact_id, reason)?;
+            println!("forgot fact_id: {fact_id}");
         }
     }
 

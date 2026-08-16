@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use memvault_core::{
-    explain, memory_as_of, recover, supersede_fact, write_fact, AsOfQuery, Explanation, Indexes,
-    KeywordIndex, Keyring, Ledger, ModelFingerprint, NamespaceId, Query, RecoveryConfig,
+    erase, explain, memory_as_of, recover, supersede_fact, write_fact, AsOfQuery, Explanation,
+    Indexes, KeywordIndex, Keyring, Ledger, ModelFingerprint, NamespaceId, Query, RecoveryConfig,
     SourceRef, VectorIndex, WriteInput,
 };
 
@@ -83,6 +83,12 @@ struct SupersedeParams {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 struct ExplainParams {
     retrieval_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct ForgetParams {
+    fact_id: String,
+    reason: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -227,6 +233,17 @@ impl MemVaultServer {
         supersede_fact(&self.stores.ledger, &mut indexes, fact_id, valid_to, params.reason).map_err(|e| e.to_string())?;
 
         Ok(format!("superseded fact_id: {fact_id}"))
+    }
+
+    #[tool(name = "memory_forget", description = "Cryptographically erase a fact: destroy its key so its content is permanently unreadable, everywhere. The ledger record stays; only its content becomes unrecoverable.")]
+    async fn memory_forget(&self, Parameters(params): Parameters<ForgetParams>) -> Result<String, String> {
+        let fact_id = Uuid::parse_str(&params.fact_id).map_err(|e| format!("invalid fact_id: {e}"))?;
+
+        let mut keyring = self.stores.keyring.lock().unwrap();
+        let mut indexes = self.stores.indexes.lock().unwrap();
+        erase(&self.stores.ledger, &mut keyring, &mut indexes, fact_id, params.reason).map_err(|e| e.to_string())?;
+
+        Ok(format!("forgot fact_id: {fact_id}"))
     }
 
     #[tool(name = "memory_search", description = "Hybrid search with full provenance for every candidate considered")]
