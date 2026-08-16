@@ -81,6 +81,11 @@ struct SupersedeParams {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct ExplainParams {
+    retrieval_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 struct SearchParams {
     namespace: String,
     #[serde(default)]
@@ -242,6 +247,13 @@ impl MemVaultServer {
         )
         .map_err(|e| e.to_string())?;
 
+        Ok(format_explanations(retrieval_id, &explanations))
+    }
+
+    #[tool(name = "memory_explain", description = "Reconstruct a past retrieval exactly from the ledger, including candidates that didn't make it")]
+    async fn memory_explain(&self, Parameters(params): Parameters<ExplainParams>) -> Result<String, String> {
+        let retrieval_id = Uuid::parse_str(&params.retrieval_id).map_err(|e| format!("invalid retrieval_id: {e}"))?;
+        let explanations = explain::explain(&self.stores.ledger, retrieval_id).map_err(|e| e.to_string())?;
         Ok(format_explanations(retrieval_id, &explanations))
     }
 }
