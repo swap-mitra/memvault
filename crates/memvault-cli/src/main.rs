@@ -14,7 +14,7 @@ use uuid::Uuid;
 use memvault_core::{
     default_fingerprint, erase, explain, memory_as_of, recover, search, supersede_fact,
     write_fact, AsOfQuery, Explanation, Indexes, KeywordIndex, Keyring, Ledger, NamespaceId,
-    Outcome, Query, RecoveryConfig, SourceRef, VectorIndex, WriteInput,
+    Outcome, Payload, Query, RecoveryConfig, SourceRef, VectorIndex, WriteInput,
 };
 
 #[derive(Parser)]
@@ -91,6 +91,10 @@ enum Command {
     },
     /// Rebuild the vector/keyword indexes from the ledger.
     Replay,
+    /// Debug: print a raw ledger record by seq, attempting to decrypt an
+    /// Assert's content so an erased fact visibly shows as undecryptable
+    /// rather than simply omitted.
+    DumpRecord { seq: u64 },
 }
 
 /// ponytail: a real embedding model is out of scope by design (product doc
@@ -276,6 +280,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let mut stores = open_stores(&cli.data_dir)?;
             let report = recover(&stores.ledger, &mut stores.indexes, &stores.keyring, &default_fingerprint(), RecoveryConfig { verify_chain: true })?;
             println!("{report:?}");
+        }
+        Command::DumpRecord { seq } => {
+            let stores = open_stores(&cli.data_dir)?;
+            let record = stores.ledger.read(seq)?.ok_or_else(|| format!("no record at seq {seq}"))?;
+            println!("seq {} kind {:?} recorded_at {}", record.header.seq, record.header.kind, record.header.recorded_at.to_rfc3339());
+            match record.payload {
+                Payload::Assert(a) => {
+                    let content_hash_hex: String = a.content_hash.iter().map(|b| format!("{b:02x}")).collect();
+                    println!("fact_id {} content_hash {} ciphertext_len {}", a.fact_id, content_hash_hex, a.content.ciphertext.len());
+                    match stores.keyring.decrypt(a.fact_id, &a.content) {
+                        Ok(plaintext) => println!("content: {}", String::from_utf8_lossy(&plaintext)),
+                        Err(e) => println!("content: undecryptable ({e})"),
+                    }
+                }
+                other => println!("payload: {other:?}"),
+            }
         }
     }
 
