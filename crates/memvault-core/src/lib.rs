@@ -38,8 +38,9 @@ pub use ledger::{Ledger, LedgerError, VerifyError, WriteAssertOutcome, WriteEras
 pub use read_path::{hybrid_search, FusedCandidate, Query, SearchError};
 pub use recovery::{recover, IndexKind, RecoveryConfig, RecoveryError, RecoveryReport};
 pub use record::{
-    Assert, Checkpoint, DecodeError, Encrypted, Erase, Explanation, ModelFingerprint, NamespaceId,
-    Outcome, Payload, Record, RecordHeader, RecordKind, Retrieval, SourceRef, Supersede,
+    default_fingerprint, Assert, Checkpoint, DecodeError, Encrypted, Erase, Explanation,
+    ModelFingerprint, NamespaceId, Outcome, Payload, Record, RecordHeader, RecordKind, Retrieval,
+    SourceRef, Supersede,
 };
 pub use working_set::{SessionHandle, SessionId, SessionState, WorkingSet};
 pub use write_path::{supersede_fact, write_fact, SupersedeError, WriteError, WriteInput};

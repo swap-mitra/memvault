@@ -15,24 +15,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use memvault_core::{
-    erase, explain, memory_as_of, recover, supersede_fact, write_fact, AsOfQuery, Explanation,
-    Indexes, KeywordIndex, Keyring, Ledger, ModelFingerprint, NamespaceId, Query, RecoveryConfig,
-    SourceRef, VectorIndex, WriteInput,
+    default_fingerprint, erase, explain, memory_as_of, recover, supersede_fact, write_fact,
+    AsOfQuery, Explanation, Indexes, KeywordIndex, Keyring, Ledger, NamespaceId, Query,
+    RecoveryConfig, SourceRef, VectorIndex, WriteInput,
 };
-
-/// No namespace config loader exists yet (same placeholder the CLI uses),
-/// so every namespace shares one fixed embedding dimensionality. 1536
-/// matches common embedding APIs closely enough to be a reasonable
-/// default until real per-namespace config exists.
-const EMBEDDING_DIMENSIONS: u32 = 1536;
-
-fn fingerprint() -> ModelFingerprint {
-    ModelFingerprint {
-        name: "caller-supplied".into(),
-        dimensions: EMBEDDING_DIMENSIONS,
-        revision_hash: [0u8; 32],
-    }
-}
 
 fn default_k() -> usize {
     10
@@ -143,11 +129,11 @@ impl Stores {
         std::fs::create_dir_all(data_dir)?;
         let ledger = Ledger::open(&data_dir.join("ledger.redb"))?;
         let keyring = Keyring::open(&data_dir.join("keys.redb"))?;
-        let vector = VectorIndex::open_or_create(&data_dir.join("vectors.usearch"), &fingerprint())?;
+        let vector = VectorIndex::open_or_create(&data_dir.join("vectors.usearch"), &default_fingerprint())?;
         let keyword = KeywordIndex::open_or_create(&data_dir.join("keyword"))?;
         let mut indexes = Indexes { vector, keyword };
 
-        let report = recover(&ledger, &mut indexes, &keyring, &fingerprint(), RecoveryConfig { verify_chain: true })?;
+        let report = recover(&ledger, &mut indexes, &keyring, &default_fingerprint(), RecoveryConfig { verify_chain: true })?;
         eprintln!("memvault-server: recovery report: {report:?}");
 
         Ok(Stores { ledger, keyring: Mutex::new(keyring), indexes: Mutex::new(indexes) })
@@ -186,7 +172,7 @@ impl MemVaultServer {
                 namespace: NamespaceId(params.namespace),
                 content: params.content.into_bytes(),
                 embedding: params.embedding,
-                embedding_model: fingerprint(),
+                embedding_model: default_fingerprint(),
                 valid_from: chrono::Utc::now(),
                 valid_to: None,
                 fact_id,

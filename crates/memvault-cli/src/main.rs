@@ -12,12 +12,10 @@ use clap::{Parser, Subcommand};
 use uuid::Uuid;
 
 use memvault_core::{
-    erase, explain, memory_as_of, recover, search, supersede_fact, write_fact, AsOfQuery,
-    Explanation, Indexes, KeywordIndex, Keyring, Ledger, ModelFingerprint, NamespaceId, Outcome,
-    Query, RecoveryConfig, SourceRef, VectorIndex, WriteInput,
+    default_fingerprint, erase, explain, memory_as_of, recover, search, supersede_fact,
+    write_fact, AsOfQuery, Explanation, Indexes, KeywordIndex, Keyring, Ledger, NamespaceId,
+    Outcome, Query, RecoveryConfig, SourceRef, VectorIndex, WriteInput,
 };
-
-const EMBEDDING_DIMENSIONS: u32 = 32;
 
 #[derive(Parser)]
 #[command(name = "memvault")]
@@ -95,14 +93,6 @@ enum Command {
     Replay,
 }
 
-fn fingerprint() -> ModelFingerprint {
-    ModelFingerprint {
-        name: "demo-hash-embedding".into(),
-        dimensions: EMBEDDING_DIMENSIONS,
-        revision_hash: [0u8; 32],
-    }
-}
-
 /// ponytail: a real embedding model is out of scope by design (product doc
 /// P5: no model calls on the hot path, no embedding model in the default
 /// build). This hashes overlapping trigrams into a fixed-width vector so
@@ -112,7 +102,7 @@ fn fingerprint() -> ModelFingerprint {
 /// or stdin) once one wants to supply it; the engine already treats
 /// embeddings as caller-supplied.
 fn fake_embedding(text: &str) -> Vec<f32> {
-    let mut v = vec![0f32; EMBEDDING_DIMENSIONS as usize];
+    let mut v = vec![0f32; default_fingerprint().dimensions as usize];
     let bytes = text.as_bytes();
     if bytes.is_empty() {
         return v;
@@ -144,7 +134,7 @@ fn open_stores(data_dir: &Path) -> Result<Stores, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(data_dir)?;
     let ledger = Ledger::open(&data_dir.join("ledger.redb"))?;
     let keyring = Keyring::open(&data_dir.join("keys.redb"))?;
-    let vector = VectorIndex::open_or_create(&data_dir.join("vectors.usearch"), &fingerprint())?;
+    let vector = VectorIndex::open_or_create(&data_dir.join("vectors.usearch"), &default_fingerprint())?;
     let keyword = KeywordIndex::open_or_create(&data_dir.join("keyword"))?;
     Ok(Stores { ledger, keyring, indexes: Indexes { vector, keyword } })
 }
@@ -219,7 +209,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     namespace: NamespaceId(namespace),
                     content: content.into_bytes(),
                     embedding: Some(embedding),
-                    embedding_model: fingerprint(),
+                    embedding_model: default_fingerprint(),
                     valid_from: Utc::now(),
                     valid_to: None,
                     fact_id,
@@ -284,7 +274,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Replay => {
             let mut stores = open_stores(&cli.data_dir)?;
-            let report = recover(&stores.ledger, &mut stores.indexes, &stores.keyring, &fingerprint(), RecoveryConfig { verify_chain: true })?;
+            let report = recover(&stores.ledger, &mut stores.indexes, &stores.keyring, &default_fingerprint(), RecoveryConfig { verify_chain: true })?;
             println!("{report:?}");
         }
     }
