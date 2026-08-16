@@ -10,7 +10,7 @@ use std::path::Path;
 
 use chacha20poly1305::aead::{Aead, Generate, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-use redb::{ReadableDatabase, TableDefinition};
+use redb::{ReadableDatabase, ReadableTable, TableDefinition};
 use uuid::Uuid;
 
 use crate::record::Encrypted;
@@ -85,24 +85,37 @@ impl Keyring {
         Ok(Keyring { db })
     }
 
-    /// Generates a fresh key for `fact_id`, stores it, and encrypts
-    /// `plaintext` under it in one step. There is no separate
-    /// generate-then-encrypt sequence a caller could get out of order or
-    /// skip half of.
+    /// Encrypts `plaintext` under `fact_id`'s key, generating and storing
+    /// one first if this is the first time `fact_id` has been encrypted.
+    /// Reuses the same key across every subsequent call for the same
+    /// `fact_id` -- a fact_id's whole supersession lineage shares one key,
+    /// so an old (superseded but not erased) version stays decryptable for
+    /// bitemporal queries (bitemporal.rs), and `destroy_key` makes the
+    /// *entire* lineage unreadable at once, not just its latest version.
+    /// Safe to reuse: each call still draws its own random nonce, and
+    /// ChaCha20-Poly1305 only requires a nonce never repeat under a given
+    /// key, not that the key itself be single-use.
     pub fn encrypt(&mut self, fact_id: Uuid, plaintext: &[u8]) -> Result<Encrypted, KeyringError> {
-        let key = Key::generate();
+        let write_txn = self.db.begin_write()?;
+        let key = {
+            let mut table = write_txn.open_table(KEYS_TABLE)?;
+            let existing = table.get(fact_id.as_bytes().as_slice())?.map(|guard| guard.value().to_vec());
+            match existing {
+                Some(bytes) => Key::try_from(bytes.as_slice()).expect("stored keyring entries are always 32 bytes"),
+                None => {
+                    let key = Key::generate();
+                    table.insert(fact_id.as_bytes().as_slice(), key.as_slice())?;
+                    key
+                }
+            }
+        };
+        write_txn.commit()?;
+
         let nonce = Nonce::generate();
         let cipher = ChaCha20Poly1305::new(&key);
         let ciphertext = cipher
             .encrypt(&nonce, plaintext)
             .expect("chacha20poly1305 encryption of an in-memory buffer cannot fail");
-
-        let write_txn = self.db.begin_write()?;
-        {
-            let mut table = write_txn.open_table(KEYS_TABLE)?;
-            table.insert(fact_id.as_bytes().as_slice(), key.as_slice())?;
-        }
-        write_txn.commit()?;
 
         Ok(Encrypted {
             nonce: nonce.into(),
