@@ -7,6 +7,7 @@
 
 # local scratch / data dirs used by demo scripts
 /demo/data/
+/demo/data2/
 *.ledger
 keys.db
 
