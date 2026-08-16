@@ -12,9 +12,9 @@ use clap::{Parser, Subcommand};
 use uuid::Uuid;
 
 use memvault_core::{
-    explain, memory_as_of, search, write_fact, AsOfQuery, Explanation, Indexes, KeywordIndex,
-    Keyring, Ledger, ModelFingerprint, NamespaceId, Outcome, Query, SourceRef, VectorIndex,
-    WriteInput,
+    explain, memory_as_of, search, supersede_fact, write_fact, AsOfQuery, Explanation, Indexes,
+    KeywordIndex, Keyring, Ledger, ModelFingerprint, NamespaceId, Outcome, Query, SourceRef,
+    VectorIndex, WriteInput,
 };
 
 const EMBEDDING_DIMENSIONS: u32 = 32;
@@ -66,6 +66,14 @@ enum Command {
         valid_time: Option<chrono::DateTime<Utc>>,
         #[arg(long = "transaction-time")]
         transaction_time: Option<chrono::DateTime<Utc>>,
+    },
+    /// Close a fact's open interval without asserting a replacement.
+    Supersede {
+        fact_id: Uuid,
+        #[arg(long = "valid-to")]
+        valid_to: Option<chrono::DateTime<Utc>>,
+        #[arg(long)]
+        reason: Option<String>,
     },
 }
 
@@ -239,6 +247,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let valid_to = f.valid_to.map(|t| t.to_rfc3339()).unwrap_or_else(|| "open".into());
                 println!("{} [{} .. {}] {}", f.fact_id, f.valid_from.to_rfc3339(), valid_to, content);
             }
+        }
+        Command::Supersede { fact_id, valid_to, reason } => {
+            let mut stores = open_stores(&cli.data_dir)?;
+            let valid_to = valid_to.unwrap_or_else(Utc::now);
+            supersede_fact(&stores.ledger, &mut stores.indexes, fact_id, valid_to, reason)?;
+            println!("superseded fact_id: {fact_id}");
         }
     }
 

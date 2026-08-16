@@ -15,9 +15,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use memvault_core::{
-    explain, memory_as_of, recover, write_fact, AsOfQuery, Explanation, Indexes, KeywordIndex,
-    Keyring, Ledger, ModelFingerprint, NamespaceId, Query, RecoveryConfig, SourceRef, VectorIndex,
-    WriteInput,
+    explain, memory_as_of, recover, supersede_fact, write_fact, AsOfQuery, Explanation, Indexes,
+    KeywordIndex, Keyring, Ledger, ModelFingerprint, NamespaceId, Query, RecoveryConfig,
+    SourceRef, VectorIndex, WriteInput,
 };
 
 /// No namespace config loader exists yet (same placeholder the CLI uses),
@@ -68,6 +68,16 @@ struct AsOfParams {
     valid_time: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default)]
     transaction_time: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct SupersedeParams {
+    fact_id: String,
+    /// When the interval closes. Omit for now.
+    #[serde(default)]
+    valid_to: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -201,6 +211,17 @@ impl MemVaultServer {
             out.push_str(&format!("{} [{} .. {}] {}\n", f.fact_id, f.valid_from.to_rfc3339(), valid_to, content));
         }
         Ok(out)
+    }
+
+    #[tool(name = "memory_supersede", description = "Close a fact's open interval without asserting a replacement")]
+    async fn memory_supersede(&self, Parameters(params): Parameters<SupersedeParams>) -> Result<String, String> {
+        let fact_id = Uuid::parse_str(&params.fact_id).map_err(|e| format!("invalid fact_id: {e}"))?;
+        let valid_to = params.valid_to.unwrap_or_else(chrono::Utc::now);
+
+        let mut indexes = self.stores.indexes.lock().unwrap();
+        supersede_fact(&self.stores.ledger, &mut indexes, fact_id, valid_to, params.reason).map_err(|e| e.to_string())?;
+
+        Ok(format!("superseded fact_id: {fact_id}"))
     }
 
     #[tool(name = "memory_search", description = "Hybrid search with full provenance for every candidate considered")]

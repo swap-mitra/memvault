@@ -160,3 +160,54 @@ pub fn write_fact(ledger: &Ledger, indexes: &mut Indexes, keyring: &mut Keyring,
 
     Ok(fact_id)
 }
+
+#[derive(Debug)]
+pub enum SupersedeError {
+    /// `fact_id` has no currently-open Assert -- nothing to close.
+    NotFound,
+    Ledger(LedgerError),
+    Index(IndexError),
+}
+
+impl std::fmt::Display for SupersedeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SupersedeError::NotFound => write!(f, "no open fact with that id"),
+            SupersedeError::Ledger(e) => write!(f, "{e}"),
+            SupersedeError::Index(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for SupersedeError {}
+
+impl From<LedgerError> for SupersedeError {
+    fn from(e: LedgerError) -> Self {
+        SupersedeError::Ledger(e)
+    }
+}
+impl From<IndexError> for SupersedeError {
+    fn from(e: IndexError) -> Self {
+        SupersedeError::Index(e)
+    }
+}
+
+/// Closes `fact_id`'s open interval without asserting a replacement --
+/// product doc §9's mitigation for the "caller-directed supersession may
+/// be too weak" risk, exposed as its own operation (`memory_supersede`)
+/// rather than only reachable as a side effect of `write_fact` with a
+/// matching `fact_id`.
+pub fn supersede_fact(ledger: &Ledger, indexes: &mut Indexes, fact_id: Uuid, valid_to: DateTime<Utc>, reason: Option<String>) -> Result<(), SupersedeError> {
+    let outcome = ledger.write_supersede(Utc::now(), fact_id, valid_to, reason)?.ok_or(SupersedeError::NotFound)?;
+
+    // Same reasoning as write_fact's post-commit step: the index only ever
+    // holds a fact's current version, and this fact no longer has one.
+    indexes.vector.remove(fact_id)?;
+    indexes.keyword.remove(fact_id)?;
+    indexes.keyword.commit()?;
+
+    indexes.vector.set_watermark(outcome.supersede_seq + 1)?;
+    indexes.keyword.set_watermark(outcome.supersede_seq + 1)?;
+
+    Ok(())
+}

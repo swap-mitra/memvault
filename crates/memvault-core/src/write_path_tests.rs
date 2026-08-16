@@ -7,7 +7,7 @@ use crate::crypto::Keyring;
 use crate::index::{Indexes, KeywordIndex, VectorIndex};
 use crate::ledger::Ledger;
 use crate::record::{ModelFingerprint, NamespaceId, Payload, SourceRef};
-use crate::write_path::{write_fact, WriteError, WriteInput};
+use crate::write_path::{supersede_fact, write_fact, SupersedeError, WriteError, WriteInput};
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -139,6 +139,44 @@ fn test_write_then_write_with_same_fact_id_supersedes() {
     assert_eq!(current[0].0, fact_id);
 
     h.ledger.verify().unwrap();
+}
+
+/// The plan's acceptance test: memory_supersede closes an open interval
+/// without a new memory_write.
+#[test]
+fn test_supersede_without_rewrite_closes_interval() {
+    let mut h = harness("supersede-no-rewrite");
+    let fact_id = write_fact(&h.ledger, &mut h.indexes, &mut h.keyring, input("default", "still true for now", None)).unwrap();
+
+    let valid_to = chrono::Utc::now();
+    supersede_fact(&h.ledger, &mut h.indexes, fact_id, valid_to, Some("no longer true".into())).unwrap();
+
+    assert_eq!(h.ledger.open_assert_seq(fact_id), None);
+    match h.ledger.read(1).unwrap().unwrap().payload {
+        Payload::Supersede(s) => {
+            assert_eq!(s.fact_id, fact_id);
+            assert_eq!(s.target_seq, 0);
+            assert_eq!(s.valid_to, valid_to);
+            assert_eq!(s.reason.as_deref(), Some("no longer true"));
+        }
+        other => panic!("expected a Supersede record at seq 1, got {other:?}"),
+    }
+
+    // No new Assert was written -- just the original plus the Supersede.
+    assert_eq!(h.ledger.head().unwrap(), 2);
+
+    // Closed, so no longer searchable.
+    let hits = h.indexes.keyword.search("still true for now", 5).unwrap();
+    assert!(hits.is_empty(), "superseded fact should not be searchable");
+
+    h.ledger.verify().unwrap();
+}
+
+#[test]
+fn supersede_unknown_fact_id_is_not_found() {
+    let mut h = harness("supersede-unknown");
+    let result = supersede_fact(&h.ledger, &mut h.indexes, Uuid::from_u128(999), chrono::Utc::now(), None);
+    assert!(matches!(result, Err(SupersedeError::NotFound)));
 }
 
 #[test]

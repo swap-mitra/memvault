@@ -193,6 +193,36 @@ impl Ledger {
         Ok(WriteAssertOutcome { assert_seq, superseded_seq })
     }
 
+    /// Closes `fact_id`'s currently-open `Assert` with a `Supersede`,
+    /// without writing a new `Assert` -- product doc §9's mitigation for
+    /// caller-directed supersession, exposed standalone rather than only
+    /// as a side effect of `write_assert`. `None` if `fact_id` has no open
+    /// Assert. Holds `open_facts` for the whole operation, same reasoning
+    /// as `write_assert`'s module-doc comment. The closed record's own
+    /// namespace is reused (a caller closing an existing fact has no
+    /// independent namespace to supply).
+    pub fn write_supersede(&self, recorded_at: DateTime<Utc>, fact_id: Uuid, valid_to: DateTime<Utc>, reason: Option<String>) -> Result<Option<WriteSupersedeOutcome>, LedgerError> {
+        let mut open_facts = self.open_facts.lock().unwrap();
+        let Some(target_seq) = open_facts.get(&fact_id).copied() else {
+            return Ok(None);
+        };
+
+        let target = self
+            .read(target_seq)?
+            .expect("open_facts points at a seq that must exist in the ledger");
+
+        let seqs = self.append_batch(
+            target.header.namespace,
+            recorded_at,
+            vec![Payload::Supersede(Supersede { fact_id, target_seq, valid_to, reason })],
+        )?;
+        let supersede_seq = seqs[0];
+
+        open_facts.remove(&fact_id);
+
+        Ok(Some(WriteSupersedeOutcome { target_seq, supersede_seq }))
+    }
+
     pub fn read(&self, seq: u64) -> Result<Option<Record>, LedgerError> {
         let txn = self.db.begin_read()?;
         let table = txn.open_table(RECORDS_TABLE)?;
@@ -231,6 +261,12 @@ impl Ledger {
 pub struct WriteAssertOutcome {
     pub assert_seq: u64,
     pub superseded_seq: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WriteSupersedeOutcome {
+    pub target_seq: u64,
+    pub supersede_seq: u64,
 }
 
 #[derive(Debug)]
