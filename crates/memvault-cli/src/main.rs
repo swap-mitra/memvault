@@ -12,8 +12,9 @@ use clap::{Parser, Subcommand};
 use uuid::Uuid;
 
 use memvault_core::{
-    explain, search, write_fact, Explanation, Indexes, KeywordIndex, Keyring, Ledger,
-    ModelFingerprint, NamespaceId, Outcome, Query, SourceRef, VectorIndex, WriteInput,
+    explain, memory_as_of, search, write_fact, AsOfQuery, Explanation, Indexes, KeywordIndex,
+    Keyring, Ledger, ModelFingerprint, NamespaceId, Outcome, Query, SourceRef, VectorIndex,
+    WriteInput,
 };
 
 const EMBEDDING_DIMENSIONS: u32 = 32;
@@ -55,6 +56,17 @@ enum Command {
     },
     /// Reconstruct a past retrieval from the ledger by its id.
     Explain { retrieval_id: Uuid },
+    /// Point-in-time query: what was true, or what was believed true, as
+    /// of a given moment (RFC 3339, e.g. 2026-01-01T00:00:00Z). Omitting
+    /// either bound means "now" on that axis.
+    AsOf {
+        #[arg(long)]
+        namespace: String,
+        #[arg(long = "valid-time")]
+        valid_time: Option<chrono::DateTime<Utc>>,
+        #[arg(long = "transaction-time")]
+        transaction_time: Option<chrono::DateTime<Utc>>,
+    },
 }
 
 fn fingerprint() -> ModelFingerprint {
@@ -218,6 +230,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let stores = open_stores(&cli.data_dir)?;
             let explanations = explain(&stores.ledger, retrieval_id)?;
             print_explanations(&explanations);
+        }
+        Command::AsOf { namespace, valid_time, transaction_time } => {
+            let stores = open_stores(&cli.data_dir)?;
+            let facts = memory_as_of(&stores.ledger, &stores.keyring, &NamespaceId(namespace), AsOfQuery { valid_time, transaction_time })?;
+            for f in &facts {
+                let content = String::from_utf8_lossy(&f.content);
+                let valid_to = f.valid_to.map(|t| t.to_rfc3339()).unwrap_or_else(|| "open".into());
+                println!("{} [{} .. {}] {}", f.fact_id, f.valid_from.to_rfc3339(), valid_to, content);
+            }
         }
     }
 

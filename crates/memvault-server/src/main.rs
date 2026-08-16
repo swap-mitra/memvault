@@ -15,8 +15,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use memvault_core::{
-    explain, recover, write_fact, Explanation, Indexes, KeywordIndex, Keyring, Ledger,
-    ModelFingerprint, NamespaceId, Query, RecoveryConfig, SourceRef, VectorIndex, WriteInput,
+    explain, memory_as_of, recover, write_fact, AsOfQuery, Explanation, Indexes, KeywordIndex,
+    Keyring, Ledger, ModelFingerprint, NamespaceId, Query, RecoveryConfig, SourceRef, VectorIndex,
+    WriteInput,
 };
 
 /// No namespace config loader exists yet (same placeholder the CLI uses),
@@ -57,6 +58,16 @@ struct WriteParams {
     fact_id: Option<String>,
     #[serde(default)]
     keywords: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct AsOfParams {
+    namespace: String,
+    /// RFC 3339 timestamp. Omit for "now" on this axis.
+    #[serde(default)]
+    valid_time: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    transaction_time: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -166,6 +177,30 @@ impl MemVaultServer {
         .map_err(|e| e.to_string())?;
 
         Ok(format!("fact_id: {written}"))
+    }
+
+    #[tool(
+        name = "memory_as_of",
+        description = "Point-in-time query: what was true, or what was believed true, at a given valid_time/transaction_time. Omit either for 'now' on that axis."
+    )]
+    async fn memory_as_of(&self, Parameters(params): Parameters<AsOfParams>) -> Result<String, String> {
+        // Reads the ledger/keyring directly, not the indexes -- see bitemporal.rs.
+        let keyring = self.stores.keyring.lock().unwrap();
+        let facts = memory_as_of(
+            &self.stores.ledger,
+            &keyring,
+            &NamespaceId(params.namespace),
+            AsOfQuery { valid_time: params.valid_time, transaction_time: params.transaction_time },
+        )
+        .map_err(|e| e.to_string())?;
+
+        let mut out = String::new();
+        for f in &facts {
+            let content = String::from_utf8_lossy(&f.content);
+            let valid_to = f.valid_to.map(|t| t.to_rfc3339()).unwrap_or_else(|| "open".into());
+            out.push_str(&format!("{} [{} .. {}] {}\n", f.fact_id, f.valid_from.to_rfc3339(), valid_to, content));
+        }
+        Ok(out)
     }
 
     #[tool(name = "memory_search", description = "Hybrid search with full provenance for every candidate considered")]

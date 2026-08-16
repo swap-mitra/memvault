@@ -1,3 +1,4 @@
+pub mod bitemporal;
 pub mod budget;
 pub mod chain;
 pub mod crypto;
@@ -24,6 +25,7 @@ mod recovery_tests;
 #[cfg(test)]
 mod write_path_tests;
 
+pub use bitemporal::{memory_as_of, AsOfError, AsOfFact, AsOfQuery};
 pub use budget::{pack_to_budget, PackedCandidate, SkippedCandidate};
 pub use chain::{record_hash, verify_chain, ChainError};
 pub use crypto::{content_hash, DecryptError, Keyring, KeyringError};
