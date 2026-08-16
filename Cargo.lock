@@ -1026,6 +1026,7 @@ dependencies = [
  "chrono",
  "clap",
  "memvault-core",
+ "redb",
  "uuid",
 ]
 

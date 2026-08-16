@@ -3,7 +3,7 @@
 use chrono::{TimeZone, Utc};
 use uuid::Uuid;
 
-use crate::chain::{record_hash, verify_chain, ChainError, GENESIS_PREV_HASH};
+use crate::chain::{record_hash, verify_chain, verify_chain_from, ChainError, GENESIS_PREV_HASH};
 use crate::record::{
     Assert, Encrypted, ModelFingerprint, NamespaceId, Payload, Record, SourceRef,
 };
@@ -91,6 +91,30 @@ fn missing_record_is_reported_as_non_sequential() {
         verify_chain(chain.into_iter()),
         Err(ChainError::NonSequential { expected: 2, found: 3 })
     );
+}
+
+#[test]
+fn verify_chain_from_resumes_after_a_trusted_prefix() {
+    let chain = build_chain(20);
+    // Skip the first 10 records entirely; the suffix alone still verifies.
+    assert_eq!(verify_chain_from(chain.into_iter().skip(10), 10), Ok(()));
+}
+
+#[test]
+fn verify_chain_from_still_detects_tampering_in_the_suffix() {
+    let mut chain = build_chain(20);
+    match &mut chain[15].payload {
+        Payload::Assert(a) => a.content.ciphertext[0] ^= 0xFF,
+        _ => unreachable!(),
+    }
+    assert_eq!(verify_chain_from(chain.into_iter().skip(10), 10), Err(ChainError::Diverged { seq: 15 }));
+}
+
+#[test]
+fn verify_chain_from_zero_still_checks_the_genesis_record() {
+    let mut chain = build_chain(5);
+    chain[0].header.prev_hash = [0xAB; 32];
+    assert_eq!(verify_chain_from(chain.into_iter(), 0), Err(ChainError::Diverged { seq: 0 }));
 }
 
 #[test]

@@ -46,8 +46,19 @@ impl std::error::Error for ChainError {}
 /// nothing yet commits to its hash — that gap is what external checkpoint
 /// anchoring closes (product doc §6.2), not this function.
 pub fn verify_chain(records: impl Iterator<Item = Record>) -> Result<(), ChainError> {
+    verify_chain_from(records, 0)
+}
+
+/// Like [`verify_chain`], but starts at `start_seq` instead of the
+/// genesis. For `start_seq == 0` this is identical to `verify_chain`
+/// (the first record's `prev_hash` is still checked against
+/// `GENESIS_PREV_HASH`). For `start_seq > 0`, the record at `start_seq` is
+/// trusted as an already-verified resume point -- there is no predecessor
+/// in `records` to re-derive its `prev_hash` from -- and only the chain
+/// *from* there forward is confirmed. Product doc §6.2's `verify --from`.
+pub fn verify_chain_from(records: impl Iterator<Item = Record>, start_seq: u64) -> Result<(), ChainError> {
     let mut prev: Option<Record> = None;
-    let mut expected_seq = 0u64;
+    let mut expected_seq = start_seq;
 
     for record in records {
         if record.header.seq != expected_seq {
@@ -57,16 +68,25 @@ pub fn verify_chain(records: impl Iterator<Item = Record>) -> Result<(), ChainEr
             });
         }
 
-        let expected_prev_hash = match &prev {
-            None => GENESIS_PREV_HASH,
-            Some(p) => record_hash(p),
-        };
-        if record.header.prev_hash != expected_prev_hash {
-            // The mismatch surfaces here, one record late: it means the
-            // *previous* record's committed-to hash no longer matches what
-            // this record expects, so the previous record is what changed.
-            let culprit_seq = prev.as_ref().map(|p| p.header.seq).unwrap_or(record.header.seq);
-            return Err(ChainError::Diverged { seq: culprit_seq });
+        match &prev {
+            Some(p) => {
+                let expected_prev_hash = record_hash(p);
+                if record.header.prev_hash != expected_prev_hash {
+                    // The mismatch surfaces here, one record late: it means
+                    // the *previous* record's committed-to hash no longer
+                    // matches what this record expects, so the previous
+                    // record is what changed.
+                    return Err(ChainError::Diverged { seq: p.header.seq });
+                }
+            }
+            None if expected_seq == 0 => {
+                if record.header.prev_hash != GENESIS_PREV_HASH {
+                    return Err(ChainError::Diverged { seq: 0 });
+                }
+            }
+            // Resuming mid-chain: nothing to check the first record's
+            // prev_hash against, by design -- it's the trusted resume point.
+            None => {}
         }
 
         expected_seq += 1;

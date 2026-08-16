@@ -28,7 +28,7 @@ mod write_path_tests;
 
 pub use bitemporal::{memory_as_of, AsOfError, AsOfFact, AsOfQuery};
 pub use budget::{pack_to_budget, PackedCandidate, SkippedCandidate};
-pub use chain::{record_hash, verify_chain, ChainError};
+pub use chain::{record_hash, verify_chain, verify_chain_from, ChainError};
 pub use crypto::{content_hash, DecryptError, Keyring, KeyringError};
 pub use decay::{apply_decay, decay_weight, DecayConfig, ScoredCandidate};
 pub use erase::{erase, EraseError};

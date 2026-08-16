@@ -12,9 +12,9 @@ use clap::{Parser, Subcommand};
 use uuid::Uuid;
 
 use memvault_core::{
-    erase, explain, memory_as_of, search, supersede_fact, write_fact, AsOfQuery, Explanation,
-    Indexes, KeywordIndex, Keyring, Ledger, ModelFingerprint, NamespaceId, Outcome, Query,
-    SourceRef, VectorIndex, WriteInput,
+    erase, explain, memory_as_of, recover, search, supersede_fact, write_fact, AsOfQuery,
+    Explanation, Indexes, KeywordIndex, Keyring, Ledger, ModelFingerprint, NamespaceId, Outcome,
+    Query, RecoveryConfig, SourceRef, VectorIndex, WriteInput,
 };
 
 const EMBEDDING_DIMENSIONS: u32 = 32;
@@ -83,6 +83,16 @@ enum Command {
         #[arg(long)]
         reason: String,
     },
+    /// Verify the hash chain. Exits non-zero and reports the first
+    /// diverging seq if it's broken.
+    Verify {
+        /// Trust everything before this seq and verify only from here
+        /// forward. Defaults to a full verification from the genesis.
+        #[arg(long, default_value_t = 0)]
+        from: u64,
+    },
+    /// Rebuild the vector/keyword indexes from the ledger.
+    Replay,
 }
 
 fn fingerprint() -> ModelFingerprint {
@@ -266,6 +276,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let mut stores = open_stores(&cli.data_dir)?;
             erase(&stores.ledger, &mut stores.keyring, &mut stores.indexes, fact_id, reason)?;
             println!("forgot fact_id: {fact_id}");
+        }
+        Command::Verify { from } => {
+            let stores = open_stores(&cli.data_dir)?;
+            stores.ledger.verify_from(from)?;
+            println!("chain verified from seq {from}");
+        }
+        Command::Replay => {
+            let mut stores = open_stores(&cli.data_dir)?;
+            let report = recover(&stores.ledger, &mut stores.indexes, &stores.keyring, &fingerprint(), RecoveryConfig { verify_chain: true })?;
+            println!("{report:?}");
         }
     }
 

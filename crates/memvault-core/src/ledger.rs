@@ -261,12 +261,19 @@ impl Ledger {
 
     /// Verifies the chain over the current contents of the ledger.
     pub fn verify(&self) -> Result<(), VerifyError> {
-        let records = self.scan_from(0).map_err(VerifyError::Ledger)?;
+        self.verify_from(0)
+    }
+
+    /// Verifies the chain from `seq` onward, trusting the record at `seq`
+    /// as an already-verified resume point rather than re-deriving it from
+    /// a predecessor. `memvault verify --from`.
+    pub fn verify_from(&self, seq: u64) -> Result<(), VerifyError> {
+        let records = self.scan_from(seq).map_err(VerifyError::Ledger)?;
         let mut collected = Vec::new();
         for record in records {
             collected.push(record.map_err(VerifyError::Ledger)?);
         }
-        chain::verify_chain(collected.into_iter()).map_err(VerifyError::Chain)
+        chain::verify_chain_from(collected.into_iter(), seq).map_err(VerifyError::Chain)
     }
 }
 
