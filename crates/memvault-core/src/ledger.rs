@@ -34,6 +34,14 @@ const RECORDS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("records
 pub enum LedgerError {
     Redb(redb::Error),
     Decode(DecodeError),
+    /// A write supplied a `fact_id` that is open in a different namespace.
+    /// Unlike the other two this is the caller's mistake, not broken
+    /// storage -- see `write_assert` for why it can't be honoured.
+    CrossNamespaceSupersede {
+        fact_id: Uuid,
+        fact_namespace: NamespaceId,
+        write_namespace: NamespaceId,
+    },
 }
 
 impl std::fmt::Display for LedgerError {
@@ -41,6 +49,11 @@ impl std::fmt::Display for LedgerError {
         match self {
             LedgerError::Redb(e) => write!(f, "ledger storage error: {e}"),
             LedgerError::Decode(e) => write!(f, "ledger record corrupt: {e}"),
+            LedgerError::CrossNamespaceSupersede { fact_id, fact_namespace, write_namespace } => write!(
+                f,
+                "fact {fact_id} belongs to namespace {}, so a write to namespace {} cannot supersede it",
+                fact_namespace.0, write_namespace.0
+            ),
         }
     }
 }
@@ -173,6 +186,28 @@ impl Ledger {
         let mut open_facts = self.open_facts.lock().unwrap();
         let fact_id = assert.fact_id;
         let superseded_seq = open_facts.get(&fact_id).copied();
+
+        // A fact_id is a global handle -- `supersede` and `erase` take one
+        // with no namespace and close the fact wherever it lives -- so a
+        // fact_id open elsewhere is a caller mistake, not a request to move
+        // the fact. Refused rather than honoured: the Supersede would be
+        // filed under the writing namespace, where the owning namespace's
+        // as_of replay could never see it, leaving the fact closed to the
+        // fact view and open to its owner with no way to reconcile the two.
+        //
+        // Checked under the same lock as the write it guards, so a
+        // concurrent writer can't move the fact between the check and the
+        // append.
+        if let Some(target_seq) = superseded_seq {
+            let target = self.read(target_seq)?.expect("open_facts points at a seq that must exist in the ledger");
+            if target.header.namespace != namespace {
+                return Err(LedgerError::CrossNamespaceSupersede {
+                    fact_id,
+                    fact_namespace: target.header.namespace,
+                    write_namespace: namespace,
+                });
+            }
+        }
 
         let mut payloads = Vec::with_capacity(2);
         if let Some(target_seq) = superseded_seq {

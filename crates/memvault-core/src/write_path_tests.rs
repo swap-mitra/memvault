@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::crypto::Keyring;
 use crate::index::{Indexes, KeywordIndex, VectorIndex};
-use crate::ledger::Ledger;
+use crate::ledger::{Ledger, LedgerError};
 use crate::record::{ModelFingerprint, NamespaceId, Payload, SourceRef};
 use crate::write_path::{supersede_fact, write_fact, SupersedeError, WriteError, WriteInput};
 
@@ -192,4 +192,45 @@ fn different_fact_ids_do_not_supersede_each_other() {
             other => panic!("expected an Assert at seq {seq}, got {other:?}"),
         }
     }
+}
+
+/// A `fact_id` is a global handle: `supersede` and `erase` both take one
+/// with no namespace and close the fact wherever it lives. So a write that
+/// supplies another namespace's `fact_id` is a caller mistake, not a
+/// request to move the fact between namespaces, and it has to be refused
+/// rather than honoured.
+///
+/// Honouring it used to file the closing `Supersede` under the *writer's*
+/// namespace, where the original owner's `memory_as_of` -- which replays
+/// only its own namespace's records -- could never see it. The fact ended
+/// up closed as far as the fact view was concerned and still open as far
+/// as its owner could tell: two answers to "is this fact live", neither
+/// recoverable from the other.
+#[test]
+fn test_write_rejects_superseding_a_fact_from_another_namespace() {
+    let mut h = harness("cross-namespace-supersede");
+
+    let fact_id = write_fact(&h.ledger, &mut h.indexes, &mut h.keyring, input("tenant-a", "alpha", None)).unwrap();
+    let head_before = h.ledger.head().unwrap();
+
+    let err = write_fact(&h.ledger, &mut h.indexes, &mut h.keyring, input("tenant-b", "beta", Some(fact_id)))
+        .expect_err("a write in tenant-b must not be allowed to supersede tenant-a's fact");
+    assert!(
+        matches!(err, WriteError::Ledger(LedgerError::CrossNamespaceSupersede { .. })),
+        "expected a cross-namespace supersede rejection, got: {err}"
+    );
+
+    // Rejected before anything was appended, so tenant-a's fact is still
+    // open, still at its original seq, and still owned by tenant-a.
+    assert_eq!(h.ledger.head().unwrap(), head_before, "a rejected write must leave no record behind");
+
+    let open_seq = h.ledger.open_assert_seq(fact_id).expect("tenant-a's fact must still be open");
+    let record = h.ledger.read(open_seq).unwrap().unwrap();
+    assert_eq!(record.header.namespace, NamespaceId("tenant-a".into()));
+    match record.payload {
+        Payload::Assert(a) => assert_eq!(a.fact_id, fact_id),
+        other => panic!("expected an Assert, got {other:?}"),
+    }
+
+    h.ledger.verify().unwrap();
 }
