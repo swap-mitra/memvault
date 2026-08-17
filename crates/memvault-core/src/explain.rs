@@ -115,6 +115,24 @@ pub fn search(ledger: &Ledger, indexes: &Indexes, query: Query) -> Result<(Vec<E
             continue;
         };
         let record = ledger.read(ledger_seq)?.ok_or(LedgerError::Decode(crate::record::DecodeError::TrailingBytes))?;
+
+        // Both indexes are shared by every namespace in a data directory,
+        // so fusion hands back candidates the caller is not entitled to and
+        // this is the only place that can tell. Dropped outright rather
+        // than reported with an outcome: `explanations` is written verbatim
+        // into a Retrieval record, so naming a foreign fact would persist
+        // its id and ledger position inside the boundary being enforced.
+        //
+        // ponytail: filtering after fusion, so a busy namespace can crowd a
+        // quiet one out of the fixed-size candidate pool and cost it recall
+        // (never correctness -- nothing foreign survives either way).
+        // Upgrade path: filter inside the indexes, which for tantivy is a
+        // term field on the namespace and for usearch means either a
+        // per-namespace index or over-fetching until k survive.
+        if record.header.namespace != namespace {
+            continue;
+        }
+
         let Payload::Assert(assert) = record.payload else {
             unreachable!("open_facts only ever points at Assert records");
         };

@@ -48,12 +48,23 @@ fn harness(tag: &str) -> Harness {
 }
 
 fn write(h: &mut Harness, content: &str, embedding: Vec<f32>, valid_from: chrono::DateTime<Utc>, valid_to: Option<chrono::DateTime<Utc>>) -> Uuid {
+    write_ns(h, "default", content, embedding, valid_from, valid_to)
+}
+
+fn write_ns(
+    h: &mut Harness,
+    namespace: &str,
+    content: &str,
+    embedding: Vec<f32>,
+    valid_from: chrono::DateTime<Utc>,
+    valid_to: Option<chrono::DateTime<Utc>>,
+) -> Uuid {
     write_fact(
         &h.ledger,
         &mut h.indexes,
         &mut h.keyring,
         WriteInput {
-            namespace: NamespaceId("default".into()),
+            namespace: NamespaceId(namespace.into()),
             content: content.as_bytes().to_vec(),
             embedding: Some(embedding),
             embedding_model: fingerprint(),
@@ -161,4 +172,45 @@ fn explain_unknown_retrieval_id_is_not_found() {
     let h = harness("explain-not-found");
     let result = explain(&h.ledger, Uuid::new_v4());
     assert!(matches!(result, Err(crate::explain::ExplainError::NotFound)));
+}
+
+/// The indexes are shared across every namespace in a data directory, so
+/// the read path has to enforce the boundary itself -- nothing upstream of
+/// it does.
+///
+/// Both facts here are byte-identical and share an embedding, so both are
+/// certain to reach fusion. Only the querying namespace's own may survive,
+/// and the other must not appear even as a cut candidate: the explanation
+/// list is written verbatim into a `Retrieval` ledger record, so naming a
+/// foreign fact there would persist its id and ledger position inside the
+/// boundary this filter exists to hold.
+#[test]
+fn test_search_never_returns_another_namespaces_facts() {
+    let mut h = harness("namespace-isolation");
+    let now = Utc::now();
+
+    let mine = write_ns(&mut h, "tenant-a", "shared secret alpha", vec![1.0, 0.0, 0.0, 0.0], now - Duration::days(1), None);
+    let theirs = write_ns(&mut h, "tenant-b", "shared secret alpha", vec![1.0, 0.0, 0.0, 0.0], now - Duration::days(1), None);
+
+    h.indexes.keyword.commit().unwrap();
+
+    let (explanations, _) = search(
+        &h.ledger,
+        &h.indexes,
+        Query {
+            text: Some("shared secret alpha".into()),
+            embedding: Some(vec![1.0, 0.0, 0.0, 0.0]),
+            embedding_model: None,
+            namespace: NamespaceId("tenant-a".into()),
+            as_of: None,
+            k: 10,
+            max_tokens: 4096,
+        },
+    )
+    .unwrap();
+
+    let returned: Vec<Uuid> = explanations.iter().map(|e| e.fact_id).collect();
+    assert!(returned.contains(&mine), "tenant-a's own fact is missing: {returned:?}");
+    assert!(!returned.contains(&theirs), "tenant-b's fact leaked into tenant-a's search: {returned:?}");
+    assert_eq!(returned.len(), 1, "only tenant-a's fact should have been considered at all: {returned:?}");
 }
