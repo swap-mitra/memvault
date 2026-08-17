@@ -1,0 +1,20 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "memvault"
+description = "Local-first memory engine for AI agents, with a hash-chained ledger that explains every retrieval."
+requires-python = ">=3.9"
+license = { text = "MIT OR Apache-2.0" }
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+dynamic = ["version"]
+
+[tool.maturin]
+# The crate is memvault-ffi (see its Cargo.toml for why), the module is memvault.
+module-name = "memvault"
+features = ["pyo3/extension-module"]
+# One abi3 wheel per platform covers CPython 3.9+.

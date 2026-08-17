@@ -5,7 +5,21 @@ edition.workspace = true
 license.workspace = true
 
 [lib]
+# Deliberately not named `memvault`: that collides with memvault-cli's bin of
+# the same name in the shared workspace target dir. maturin renames the
+# artifact to the Python module name via `module-name` in pyproject.toml.
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 memvault-core = { path = "../memvault-core" }
+chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+uuid = "1.24.1"
+# abi3-py39: one wheel per platform covers every CPython >= 3.9, instead of a
+# build matrix multiplied by interpreter version.
+pyo3 = { version = "0.29.2", features = ["abi3-py39"] }
+
+[features]
+# maturin turns this on when building the wheel. Left off for plain `cargo
+# build`/`cargo test`, which need to link against libpython (and on Windows
+# cannot link a cdylib with undefined symbols at all).
+extension-module = ["pyo3/extension-module"]
