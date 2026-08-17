@@ -121,7 +121,7 @@ Restart the client, and the agent has six tools:
 
 | Tool | What it does |
 |---|---|
-| `memory_write` | Assert a fact. Pass an existing `fact_id` to supersede that fact instead. |
+| `memory_write` | Assert a fact. Pass an existing `fact_id` to supersede that fact instead — it has to be one of this namespace's own. |
 | `memory_search` | Hybrid retrieval with the full provenance table above. |
 | `memory_as_of` | What was true — or what the engine believed — at a given moment. |
 | `memory_supersede` | Close a fact's interval without asserting a replacement. |

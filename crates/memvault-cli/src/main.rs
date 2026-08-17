@@ -30,7 +30,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Assert a fact. Supplying --fact-id supersedes that fact's current version.
+    /// Assert a fact. Supplying --fact-id supersedes that fact's current
+    /// version; the fact must belong to --namespace.
     Write {
         #[arg(long)]
         namespace: String,
