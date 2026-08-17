@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package memvault.v1;
+
+// The same six operations the MCP server exposes (product doc §6.8), for
+// multi-process deployments where stdio isn't available. Unlike the MCP
+// tools, which return text an agent reads, these return structured messages.
+service Memory {
+  rpc Write(WriteRequest) returns (WriteResponse);
+  rpc Search(SearchRequest) returns (SearchResponse);
+  rpc AsOf(AsOfRequest) returns (AsOfResponse);
+  rpc Supersede(SupersedeRequest) returns (SupersedeResponse);
+  rpc Forget(ForgetRequest) returns (ForgetResponse);
+  rpc Explain(ExplainRequest) returns (SearchResponse);
+}
+
+message WriteRequest {
+  string namespace = 1;
+  string content = 2;
+  // Caller-supplied; must match the configured dimensionality if present.
+  repeated float embedding = 3;
+  bool pinned = 4;
+  // Supersedes this fact's open version instead of asserting a new one.
+  optional string fact_id = 5;
+  repeated string keywords = 6;
+}
+
+message WriteResponse {
+  string fact_id = 1;
+}
+
+message SearchRequest {
+  string namespace = 1;
+  optional string query = 2;
+  repeated float embedding = 3;
+  uint32 k = 4;
+  uint32 max_tokens = 5;
+}
+
+// Every candidate considered, cut ones included -- mirrors
+// memvault_core::Explanation field for field.
+message Explanation {
+  string fact_id = 1;
+  uint64 ledger_seq = 2;
+  optional uint32 ann_rank = 3;
+  optional float ann_distance = 4;
+  optional uint32 bm25_rank = 5;
+  optional float bm25_score = 6;
+  float rrf_score = 7;
+  float decay_weight = 8;
+  float final_score = 9;
+  // Injected | CutByBudget | CutByK | FilteredByTime
+  string outcome = 10;
+  uint32 token_cost = 11;
+}
+
+message SearchResponse {
+  string retrieval_id = 1;
+  repeated Explanation explanations = 2;
+}
+
+message AsOfRequest {
+  string namespace = 1;
+  // RFC 3339. Omit either for "now" on that axis.
+  optional string valid_time = 2;
+  optional string transaction_time = 3;
+}
+
+message Fact {
+  string fact_id = 1;
+  uint64 ledger_seq = 2;
+  string valid_from = 3;
+  optional string valid_to = 4;
+  string content = 5;
+  bool pinned = 6;
+}
+
+message AsOfResponse {
+  repeated Fact facts = 1;
+}
+
+message SupersedeRequest {
+  string fact_id = 1;
+  optional string valid_to = 2;
+  optional string reason = 3;
+}
+
+message SupersedeResponse {}
+
+message ForgetRequest {
+  string fact_id = 1;
+  string reason = 2;
+}
+
+message ForgetResponse {}
+
+message ExplainRequest {
+  string retrieval_id = 1;
+}

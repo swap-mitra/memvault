@@ -13,5 +13,22 @@ serde = { version = "1.0.229", features = ["derive"] }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1.24.1", features = ["v4"] }
 
+# Off by default: the primary (stdio MCP) use case must not pay for a
+# transport it never opens -- product doc §6.8.
+prost = { version = "0.14.4", optional = true }
+tonic = { version = "0.14.6", optional = true }
+tonic-prost = { version = "0.14.6", optional = true }
+
+[build-dependencies]
+protoc-bin-vendored = { version = "3.2.0", optional = true }
+tonic-prost-build = { version = "0.14.6", optional = true }
+
+[features]
+grpc = ["dep:prost", "dep:tonic", "dep:tonic-prost", "dep:protoc-bin-vendored", "dep:tonic-prost-build"]
+
 [dev-dependencies]
 serde_json = "1.0.151"
+# For the grpc smoke test only: lets tonic serve on an OS-assigned port
+# instead of racing for a fixed one.
+tokio = { version = "1.53.1", features = ["net"] }
+tokio-stream = { version = "0.1.18", features = ["net"] }
