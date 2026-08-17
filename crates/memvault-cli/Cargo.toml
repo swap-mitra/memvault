@@ -9,7 +9,6 @@ name = "memvault"
 path = "src/main.rs"
 
 [dependencies]
-blake3 = "1.8.6"
 chrono = "0.4.45"
 clap = { version = "4.6.6", features = ["derive"] }
 memvault-core = { path = "../memvault-core" }
