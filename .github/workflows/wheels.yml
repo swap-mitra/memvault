@@ -1,0 +1,61 @@
+name: wheels
+
+# Plan task P2-1: abi3 wheels for the four platform targets named in product
+# doc §6.8, plus the Python roundtrip test run against a real built wheel on
+# one of them.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.target }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist -m crates/memvault-ffi/Cargo.toml
+          target: ${{ matrix.target }}
+          # manylinux build happens in a container; native elsewhere.
+          manylinux: ${{ matrix.os == 'ubuntu-latest' && '2_28' || 'auto' }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.target }}
+          path: dist
+
+  test-wheel:
+    # The behaviour check. The other three targets are build-matrix checks
+    # only, per P2-1's acceptance criteria.
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel-x86_64-unknown-linux-gnu
+          path: dist
+      - run: pip install --no-index --find-links dist memvault
+      - run: python crates/memvault-ffi/tests/test_ffi_write_search_roundtrip.py
