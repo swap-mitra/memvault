@@ -301,11 +301,13 @@ Stated plainly, because each one will otherwise look like a bug:
   machinery has something to run on — that stand-in is *not* semantically
   meaningful, and no number produced with it should be read as retrieval
   quality.
-- **`namespace` does not filter search results yet.** It is recorded on
-  every write and every retrieval, and `memory_as_of` respects it, but
-  `memory_search` currently scores across all namespaces in a data
-  directory. Until that's fixed, use a separate `--data-dir` per tenant if
-  you need isolation.
+- **Namespaces isolate results, but share one candidate pool.** A search
+  never returns another namespace's facts. It does draw its candidates from
+  indexes shared across the whole data directory and filter afterwards, so
+  a namespace holding far more facts than its neighbours can crowd them out
+  of that pool and cost them recall. Nothing leaks either way; a very
+  lopsided multi-tenant directory is still better off with a `--data-dir`
+  per tenant.
 - **Token counts are estimates** — ciphertext bytes / 4, not a tokenizer.
   Close enough for budgeting English prose, drifting on code.
 - **Decay measures from a fact's own start**, not from last access, so

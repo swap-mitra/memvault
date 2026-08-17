@@ -64,11 +64,13 @@ class Store:
     """A MemVault instance over one question's haystack.
 
     ponytail: one data directory per question, not one namespace per
-    question. The read path takes a namespace on the Query but does not
-    filter candidates by it (see crates/memvault-core/src/read_path.rs), so
-    namespaces would leak one question's haystack into another's results and
-    silently inflate every score. Separate directories are correct today and
-    stay correct if that changes; the cost is a store open per question.
+    question. Namespaces do isolate results, but they filter after fusion
+    out of one shared candidate pool, so a single directory holding every
+    question's haystack would let the corpus crowd each question's own
+    evidence out of that pool and depress the score for a reason that has
+    nothing to do with retrieval quality. The cost is a store open per
+    question. Upgrade path: one namespace per question, once the indexes
+    filter before fusion rather than after.
     """
 
     data_dir: str = field(default_factory=lambda: tempfile.mkdtemp(prefix="memvault-bench-"))
