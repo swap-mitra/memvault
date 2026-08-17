@@ -1,5 +1,11 @@
 //! MCP server exposing `memory_write` and `memory_search` over stdio.
 //! Stdout is the protocol channel; only stderr is used for logging.
+//!
+//! Setting `MEMVAULT_GRPC_ADDR` serves the same operations over gRPC
+//! instead, if the binary was built with `--features grpc`.
+
+#[cfg(feature = "grpc")]
+mod grpc;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -272,6 +278,17 @@ impl ServerHandler for MemVaultServer {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = std::env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("./memvault-data"));
+
+    let grpc_addr = std::env::var("MEMVAULT_GRPC_ADDR").ok();
+    #[cfg(not(feature = "grpc"))]
+    if grpc_addr.is_some() {
+        return Err("MEMVAULT_GRPC_ADDR is set but this binary was built without --features grpc".into());
+    }
+    #[cfg(feature = "grpc")]
+    if let Some(addr) = grpc_addr {
+        return grpc::serve(Arc::new(Stores::open(&data_dir)?), addr.parse()?).await;
+    }
+
     let server = MemVaultServer::open(&data_dir)?;
     let running = server.serve(rmcp::transport::stdio()).await?;
     running.waiting().await?;
