@@ -1,0 +1,29 @@
+name: ci
+
+# Plan §6: "each task's test is the CI check; wire the runner once." This is
+# that runner. It also runs both demo scripts, which P0-D1 and P1-D2 require
+# CI to run so they can't silently rot -- P1-D2 calls its script "the
+# project's highest-value automated test".
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --all-targets
+
+      # P2-2's other half. The default build's "no tonic in the dependency
+      # tree" assertion runs above; the one-RPC smoke test only compiles
+      # under the feature, so it needs its own invocation.
+      - run: cargo test -p memvault-server --features grpc
+
+      - run: bash demo/run_demo_1.sh
+      - run: bash demo/run_demo_2.sh
