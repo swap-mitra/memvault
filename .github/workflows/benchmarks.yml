@@ -1,0 +1,44 @@
+name: benchmarks
+
+# Plan P2-3/P2-4: the benchmark harnesses are a scheduled job, not a
+# per-PR one, given their runtime.
+#
+# The real LongMemEval and LOCOMO datasets are large external downloads and
+# grading them needs a generator, so neither runs unattended here. What does
+# run is everything that can: the harnesses checked against fixtures in the
+# real datasets' shape, against a real built wheel, and P2-5's §7 latency,
+# verification, and rebuild protocol.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  harnesses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist -m crates/memvault-ffi/Cargo.toml
+          manylinux: "2_28"
+      - run: pip install --no-index --find-links dist memvault
+      - run: python benchmarks/test_harnesses.py
+
+  latency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # --hardware is not optional here: §7's rule is that a number without
+      # its measurement protocol is marketing, and a shared CI runner is the
+      # single most misleading place to publish an unlabelled latency figure.
+      - run: >
+          cargo run --release -p memvault-bench --
+          --hardware "github actions ubuntu-latest runner (shared vCPU, not a latency reference)"
