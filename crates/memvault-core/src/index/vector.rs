@@ -192,6 +192,15 @@ impl VectorIndex {
         };
         write_txn.commit()?;
 
+        // usearch refuses an insert past the reserved capacity, and capacity
+        // only ever grew at open/reset -- so a process that inserted past its
+        // headroom failed until something reopened the index. Grow here, where
+        // every insert routes through. Doubling, so a large corpus doesn't pay
+        // a reserve (and its copy) every RESERVE_HEADROOM records.
+        if self.index.size() >= self.index.capacity() {
+            let grown = (self.index.capacity() * 2).max(self.index.size() + RESERVE_HEADROOM);
+            self.index.reserve(grown)?;
+        }
         self.index.add(key, embedding)?;
         self.save()
     }

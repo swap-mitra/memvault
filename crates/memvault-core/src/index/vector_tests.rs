@@ -113,3 +113,17 @@ fn reset_discards_everything_and_accepts_a_new_dimensionality() {
     // And inserting at the new dimensionality works.
     index.insert(Uuid::from_u128(2), &vec![1.0; 16]).unwrap();
 }
+
+/// Regression: inserts past the capacity reserved at open used to fail with
+/// usearch's "Reserve capacity ahead of insertions!" until the index was
+/// reopened, which is what a bulk load (the benchmark corpus) hits first.
+#[test]
+fn inserts_past_the_reserved_headroom_keep_working() {
+    let path = TempPath(temp_index_path("grow"));
+    let mut index = VectorIndex::open_or_create(&path.0, &fingerprint()).unwrap();
+    for i in 0..1100u64 {
+        index.insert(Uuid::from_u128(i as u128 + 1), &vector_for(i)).unwrap();
+    }
+    let results = index.search(&vector_for(1099), 1).unwrap();
+    assert_eq!(results[0].0, Uuid::from_u128(1100));
+}
