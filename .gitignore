@@ -1,5 +1,9 @@
-# agent-facing planning docs, not part of the shipped project
-/docs/
+# agent-facing planning docs, not part of the shipped project. The landing
+# page lives here too, because GitHub Pages only serves / or /docs from a
+# branch, and it is shipped.
+/docs/*
+!/docs/index.html
+!/docs/check_index.py
 
 # Rust
 /target/

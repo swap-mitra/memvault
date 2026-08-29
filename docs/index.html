@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MemVault — a local-first memory engine for AI agents</title>
+<meta name="description" content="MemVault stores what you give an agent and explains what it hands back. Append-only hash-chained ledger, hybrid retrieval, provable forgetting. One binary, no service, no network.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@110,600;110,700&family=JetBrains+Mono:wght@400;700&family=Public+Sans:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  /* Palette. The three accents are the `outcome` column's legend: a colour
+     means the same thing in the table, the diagrams and the prose. */
+  --ink:       #0F1720;  /* ground */
+  --panel:     #17222E;  /* record surfaces */
+  --bone:      #E7EBEF;  /* text */
+  --brass:     #D2A63C;  /* verified, chain intact */
+  --verdigris: #59A98C;  /* injected, retained */
+  --clay:      #C8624F;  /* cut, erased, undecryptable */
+
+  --muted: color-mix(in srgb, var(--bone) 62%, var(--ink));
+  --faint: color-mix(in srgb, var(--bone) 38%, var(--ink));
+  --rule:  color-mix(in srgb, var(--bone) 16%, var(--ink));
+  --raise: color-mix(in srgb, var(--panel) 88%, var(--bone));
+
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body:    "Public Sans", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --data:    "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  --fs-display: clamp(2.5rem, 6.2vw, 4.25rem);
+  --fs-h2:      clamp(1.55rem, 3vw, 2.15rem);
+  --fs-lede:    clamp(1.05rem, 1.6vw, 1.25rem);
+  --fs-body:    1.0625rem;
+  --fs-data:    0.8125rem;
+
+  --gutter: clamp(1.25rem, 5vw, 3rem);
+  --rail:   11rem;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--bone);
+  font: 400 var(--fs-body)/1.65 var(--body);
+  overflow-x: hidden;
+}
+
+h1, h2 {
+  font-family: var(--display);
+  font-variation-settings: "wdth" 110;
+  font-weight: 700;
+  line-height: 1.04;
+  letter-spacing: -0.015em;
+  margin: 0;
+  text-wrap: balance;
+}
+h1 { font-size: var(--fs-display); }
+h2 { font-size: var(--fs-h2); }
+p  { margin: 0 0 1.1em; max-width: 62ch; }
+a  { color: var(--brass); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+
+:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.skip {
+  position: absolute; left: -9999px;
+  background: var(--brass); color: var(--ink);
+  padding: .6rem 1rem; font: 700 var(--fs-data) var(--data);
+}
+.skip:focus { left: var(--gutter); top: .75rem; z-index: 10; }
+
+.page {
+  max-width: calc(var(--rail) + 3rem + 68ch);
+  margin: 0 auto;
+  padding: 0 var(--gutter) 6rem;
+}
+
+/* ---- Sections are ledger records ------------------------------------- */
+
+.record {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.5rem;
+  padding: clamp(3rem, 7vw, 5.5rem) 0;
+  border-top: 1px solid var(--rule);
+}
+.record:first-of-type { border-top: 0; }
+
+.record__mark {
+  font: 400 var(--fs-data)/1.7 var(--data);
+  color: var(--faint);
+  position: relative;
+}
+.record__seq {
+  display: block;
+  color: var(--brass);
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+.record__hash { display: block; white-space: nowrap; }
+.record__hash b { color: var(--muted); font-weight: 400; }
+
+/* The chain: one link drawn per record, from this record's marker down to
+   the next one. Nothing here is decorative — a record's `prev` really is the
+   record above it. */
+.record__link {
+  display: none;
+  position: absolute;
+  left: .3rem;
+  top: 6.2rem;
+  bottom: -1rem;
+  width: 1px;
+  background: linear-gradient(var(--brass), color-mix(in srgb, var(--brass) 25%, transparent));
+}
+.record__mark::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5.1rem;
+  width: .625rem;
+  height: .625rem;
+  border: 1px solid var(--brass);
+  transform: rotate(45deg);
+  display: none;
+}
+
+.eyebrow {
+  font: 700 var(--fs-data)/1 var(--data);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--verdigris);
+  margin: 0 0 1rem;
+}
+.lede { font-size: var(--fs-lede); color: var(--muted); }
+.record h2 + p { margin-top: 1.2rem; }
+
+@media (min-width: 64rem) {
+  .record { grid-template-columns: var(--rail) minmax(0, 1fr); gap: 3rem; }
+  .record__link, .record__mark::before { display: block; }
+  .record__mark { padding-left: 1.5rem; }
+  .record__link { left: .3rem; }
+}
+
+/* ---- Surfaces --------------------------------------------------------- */
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  padding: clamp(1rem, 3vw, 1.5rem);
+}
+
+table.spec {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .9375rem;
+  margin: 0 0 1.5rem;
+}
+table.spec th, table.spec td {
+  text-align: left;
+  vertical-align: top;
+  padding: .8rem 1rem .8rem 0;
+  border-top: 1px solid var(--rule);
+}
+table.spec th {
+  font: 700 var(--fs-data)/1.5 var(--data);
+  color: var(--brass);
+  white-space: nowrap;
+  width: 1%;
+}
+table.spec td { color: var(--muted); }
+
+/* ---- Foot stamp ------------------------------------------------------- */
+
+.stamp {
+  margin-top: 3rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--rule);
+  font: 700 var(--fs-data)/1.6 var(--data);
+  color: var(--verdigris);
+  letter-spacing: .04em;
+}
+.stamp span { display: block; color: var(--faint); font-weight: 400; letter-spacing: 0; }
+
+/* ---- Motion: the chain draws itself as you scroll. Native scroll-driven
+   animation, so there is no JavaScript and no fallback to maintain: where
+   it is unsupported the links are simply already drawn. --------------- */
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) and (min-width: 64rem) {
+    .record__link {
+      transform-origin: top;
+      animation: draw linear both;
+      animation-timeline: view();
+      animation-range: entry 25% cover 45%;
+    }
+    @keyframes draw { from { scale: 1 0; } to { scale: 1 1; } }
+  }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#start">Skip to content</a>
+
+<main class="page" id="start">
+
+  <section class="record" aria-labelledby="r0">
+    <div class="record__mark">
+      <span class="record__seq">SEQ 00</span>
+      <span class="record__hash">hash <b>a1f0c2d4</b></span>
+      <span class="record__hash">prev <b>00000000</b></span>
+      <span class="record__link" aria-hidden="true"></span>
+    </div>
+    <div>
+      <p class="eyebrow">Local-first memory for agents</p>
+      <h1 id="r0">Every fact it holds, and every fact it decided not to hand over.</h1>
+      <p class="lede">MemVault stores what you give it and explains what it hands back. One
+      binary, no service to operate, no network required.</p>
+      <p>Every retrieval is recorded in an append-only, hash-chained ledger, so
+      &ldquo;why did the agent know that?&rdquo; always has an answer, and
+      &ldquo;forget this&rdquo; is something you can prove rather than trust.</p>
+    </div>
+  </section>
+
+  <section class="record" aria-labelledby="r1">
+    <div class="record__mark">
+      <span class="record__seq">SEQ 01</span>
+      <span class="record__hash">hash <b>6b39e07c</b></span>
+      <span class="record__hash">prev <b>a1f0c2d4</b></span>
+      <span class="record__link" aria-hidden="true"></span>
+    </div>
+    <div>
+      <p class="eyebrow">How it works</p>
+      <h2 id="r1">Two indexes, fused by rank, packed to a budget.</h2>
+      <p>A vector index and a keyword index answer every query independently.
+      Their ranks are fused, weighted by decay, and packed to fit the token
+      budget you set. What the fusion cut is written down next to what it kept.</p>
+    </div>
+  </section>
+
+  <section class="record" aria-labelledby="r2">
+    <div class="record__mark">
+      <span class="record__seq">SEQ 02</span>
+      <span class="record__hash">hash <b>d84c1fa2</b></span>
+      <span class="record__hash">prev <b>6b39e07c</b></span>
+      <span class="record__link" aria-hidden="true"></span>
+    </div>
+    <div>
+      <p class="eyebrow">Run it</p>
+      <h2 id="r2">Four ways in, one engine behind them.</h2>
+      <p>The CLI, an MCP server over stdio, an optional gRPC surface, and Python
+      in-process. Every one of them returns the same provenance.</p>
+    </div>
+  </section>
+
+  <section class="record" aria-labelledby="r3">
+    <div class="record__mark">
+      <span class="record__seq">SEQ 03</span>
+      <span class="record__hash">hash <b>2e75b9c1</b></span>
+      <span class="record__hash">prev <b>d84c1fa2</b></span>
+      <span class="record__link" aria-hidden="true"></span>
+    </div>
+    <div>
+      <p class="eyebrow">Provable forgetting</p>
+      <h2 id="r3">Erase a fact and the chain still verifies.</h2>
+      <p>Cryptographic erase: the key dies, the record stays, the chain holds.
+      The fact leaves search, its content hash survives, and nobody can recover
+      what it said.</p>
+    </div>
+  </section>
+
+  <section class="record" aria-labelledby="r4">
+    <div class="record__mark">
+      <span class="record__seq">SEQ 04</span>
+      <span class="record__hash">hash <b>90fa3d68</b></span>
+      <span class="record__hash">prev <b>2e75b9c1</b></span>
+      <span class="record__link" aria-hidden="true"></span>
+    </div>
+    <div>
+      <p class="eyebrow">Bitemporal</p>
+      <h2 id="r4">What was true, and what the engine believed.</h2>
+      <p>Two axes, both queryable. Ask what held at a moment, or ask what
+      MemVault thought held at that moment. They are not the same question, and
+      a memory that conflates them cannot explain itself.</p>
+    </div>
+  </section>
+
+  <section class="record" aria-labelledby="r5">
+    <div class="record__mark">
+      <span class="record__seq">SEQ 05</span>
+      <span class="record__hash">hash <b>47c8e215</b></span>
+      <span class="record__hash">prev <b>90fa3d68</b></span>
+      <span class="record__link" aria-hidden="true"></span>
+    </div>
+    <div>
+      <p class="eyebrow">Install</p>
+      <h2 id="r5">Hand it to your agent.</h2>
+      <p>Paste one prompt into the agent you already use and let it clone,
+      build, wire up the MCP config, and prove the round trip works.</p>
+    </div>
+  </section>
+
+  <section class="record" aria-labelledby="r6">
+    <div class="record__mark">
+      <span class="record__seq">SEQ 06</span>
+      <span class="record__hash">hash <b>bb1d6094</b></span>
+      <span class="record__hash">prev <b>47c8e215</b></span>
+    </div>
+    <div>
+      <p class="eyebrow">Known limits</p>
+      <h2 id="r6">Stated plainly, because each one otherwise looks like a bug.</h2>
+      <table class="spec">
+        <tbody>
+          <tr>
+            <th scope="row">Embeddings are caller-supplied</th>
+            <td>MemVault runs no model. The MCP and Python surfaces accept an
+            <code>embedding</code> and fall back to keyword-only retrieval
+            without one.</td>
+          </tr>
+          <tr>
+            <th scope="row">Namespaces share a candidate pool</th>
+            <td>A search never returns another namespace&rsquo;s facts, but a
+            namespace holding far more facts than its neighbours can crowd them
+            out of the pool and cost them recall.</td>
+          </tr>
+          <tr>
+            <th scope="row">Token counts are estimates</th>
+            <td>Ciphertext bytes / 4, not a tokenizer. Close enough for English
+            prose, drifting on code.</td>
+          </tr>
+          <tr>
+            <th scope="row">Decay measures from a fact&rsquo;s own start</th>
+            <td>Not from last access, so retrieval does not yet reinforce a fact
+            against decay.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="stamp">chain verified from seq 0
+        <span>MIT OR Apache-2.0 &middot; <a href="https://github.com/swap-mitra/memvault">github.com/swap-mitra/memvault</a></span>
+      </p>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>
