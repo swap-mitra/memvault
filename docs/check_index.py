@@ -67,6 +67,11 @@ def main() -> int:
 
     errors += hero_rows_match_readme(html)
 
+    # An inline icon means the tab is drawn without a request. Swap it for a
+    # file and every page load fetches one, or 404s on /favicon.ico.
+    if 'rel="icon"' not in html or 'href="data:image/svg+xml,' not in html:
+        errors.append("favicon is missing or is not an inline data: URI")
+
     for line in errors:
         print(f"FAIL {line}")
     print("chain verified from seq 0" if not errors else f"{len(errors)} problem(s)")
