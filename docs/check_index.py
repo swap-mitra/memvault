@@ -17,6 +17,31 @@ RECORD = re.compile(
 )
 
 
+ROW = re.compile(r"<tr class=\"(?:kept|cut)\">(.*?)</tr>", re.S)
+CELL = re.compile(r"<td[^>]*>(.*?)</td>", re.S)
+
+
+def hero_rows_match_readme(html: str) -> list:
+    """The hero table quotes a real run from the README. If the README's
+    numbers move, the page is quoting something that never happened."""
+    readme = (PAGE.parent.parent / "README.md").read_text(encoding="utf-8")
+    rid = html.split("retrieval_id: <b>", 1)[1][:8]
+    tail = readme.split(f"retrieval_id: {rid}", 1)[-1]
+    block = []
+    for line in tail.splitlines():
+        if line.startswith("```"):
+            break
+        if re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-", line):
+            block.append(line.split())
+    page = [
+        [re.sub(r"<[^>]+>", "", c).strip() for c in CELL.findall(row)]
+        for row in ROW.findall(html)
+    ]
+    if page != block:
+        return [f"hero table does not match README: {page} != {block}"]
+    return []
+
+
 def main() -> int:
     html = PAGE.read_text(encoding="utf-8")
     records = RECORD.findall(html)
@@ -39,6 +64,8 @@ def main() -> int:
     strays = re.findall(r"#[0-9a-fA-F]{3,8}\b(?!;?\s*/\*)", body)
     if strays:
         errors.append(f"hard-coded colours below :root: {strays}")
+
+    errors += hero_rows_match_readme(html)
 
     for line in errors:
         print(f"FAIL {line}")

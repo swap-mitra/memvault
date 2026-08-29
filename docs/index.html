@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MemVault — a local-first memory engine for AI agents</title>
+<title>MemVault: a local-first memory engine for AI agents</title>
 <meta name="description" content="MemVault stores what you give an agent and explains what it hands back. Append-only hash-chained ledger, hybrid retrieval, provable forgetting. One binary, no service, no network.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -28,7 +28,7 @@
   --body:    "Public Sans", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   --data:    "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
 
-  --fs-display: clamp(2.5rem, 6.2vw, 4.25rem);
+  --fs-display: clamp(2.25rem, 5vw, 3.4rem);
   --fs-h2:      clamp(1.55rem, 3vw, 2.15rem);
   --fs-lede:    clamp(1.05rem, 1.6vw, 1.25rem);
   --fs-body:    1.0625rem;
@@ -85,7 +85,7 @@ a  { color: var(--brass); text-decoration-thickness: 1px; text-underline-offset:
 
 .record {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.5rem;
   padding: clamp(3rem, 7vw, 5.5rem) 0;
   border-top: 1px solid var(--rule);
@@ -107,7 +107,7 @@ a  { color: var(--brass); text-decoration-thickness: 1px; text-underline-offset:
 .record__hash b { color: var(--muted); font-weight: 400; }
 
 /* The chain: one link drawn per record, from this record's marker down to
-   the next one. Nothing here is decorative — a record's `prev` really is the
+   the next one. Nothing here is decorative; a record's `prev` really is the
    record above it. */
 .record__link {
   display: none;
@@ -187,6 +187,109 @@ table.spec td { color: var(--muted); }
 }
 .stamp span { display: block; color: var(--faint); font-weight: 400; letter-spacing: 0; }
 
+/* ---- Hero: the provenance table ---------------------------------------
+   The table is the product's argument, so it is the hero rather than an
+   illustration of one. Rows are the README's own, verbatim. */
+
+.bleed {
+  grid-column: 1 / -1;
+  min-width: 0;
+  width: min(100vw - 2 * var(--gutter), 74rem);
+  margin: 2.5rem 0 0 50%;
+  transform: translateX(-50%);
+}
+.follow { grid-column: 1 / -1; }
+@media (min-width: 64rem) { .follow { grid-column: 2; } }
+.note { margin: 0; }
+
+.term {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  padding: 1rem 1.1rem;
+  font: 400 var(--fs-data)/1.75 var(--data);
+  color: var(--muted);
+  overflow-x: auto;
+}
+.term .sig { color: var(--verdigris); user-select: none; }
+.term .key { color: var(--bone); }
+.term .rid { display: block; margin-top: .9rem; color: var(--faint); }
+.term .rid b { color: var(--brass); font-weight: 400; }
+
+.prov-wrap {
+  overflow-x: auto;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-top: 0;
+}
+.prov-wrap:focus-visible { outline-offset: -2px; }
+
+table.prov {
+  border-collapse: collapse;
+  min-width: 48rem;
+  width: 100%;
+  font: 400 var(--fs-data)/1 var(--data);
+  font-variant-numeric: tabular-nums;
+}
+table.prov th, table.prov td {
+  padding: .7rem .7rem;
+  text-align: right;
+  white-space: nowrap;
+}
+table.prov th:first-child, table.prov td:first-child { text-align: left; }
+table.prov thead th {
+  font-weight: 400;
+  color: var(--faint);
+  border-bottom: 1px solid var(--rule);
+}
+table.prov tbody td {
+  border-top: 1px solid color-mix(in srgb, var(--rule) 55%, transparent);
+}
+.prov .out { font-weight: 700; }
+.prov .kept .out { color: var(--verdigris); }
+.prov .cut { color: var(--faint); }
+.prov .cut .out { color: var(--clay); }
+.prov .cut td:first-child {
+  text-decoration: line-through;
+  text-decoration-color: var(--clay);
+  text-decoration-thickness: 1px;
+}
+
+.legend {
+  display: grid;
+  gap: .5rem 2rem;
+  margin: 1.75rem 0 0;
+  font-size: .9375rem;
+}
+.legend dt {
+  font: 700 var(--fs-data)/1.6 var(--data);
+  color: var(--brass);
+}
+.legend dd { margin: 0 0 .9rem; color: var(--muted); max-width: 62ch; }
+
+@media (min-width: 48rem) {
+  .legend { grid-template-columns: 11rem minmax(0, 1fr); }
+  .legend dt { text-align: right; padding-top: .15rem; }
+}
+
+/* One load sequence: rows settle in rank order, then the two the budget cut
+   fade back and take their strike. Everything above is the finished state,
+   so reduced motion (and no CSS animation at all) lands on it directly. */
+
+@media (prefers-reduced-motion: no-preference) {
+  .prov tbody tr { animation: settle .45s cubic-bezier(.2,.7,.3,1) backwards; }
+  .prov tbody tr:nth-child(1) { animation-delay: .2s; }
+  .prov tbody tr:nth-child(2) { animation-delay: .35s; }
+  .prov tbody tr:nth-child(3) { animation-delay: .5s; }
+  .prov .cut { animation: settle .45s cubic-bezier(.2,.7,.3,1) backwards,
+                          fade .4s ease 1.15s backwards; }
+  .prov .cut td:first-child { animation: strike .45s ease-out 1.25s backwards; }
+  .prov .cut .out { animation: fade .4s ease 1.15s backwards; }
+
+  @keyframes settle { from { opacity: 0; transform: translateY(.6rem); } }
+  @keyframes fade { from { color: var(--bone); } }
+  @keyframes strike { from { text-decoration-color: transparent; } }
+}
+
 /* ---- Motion: the chain draws itself as you scroll. Native scroll-driven
    animation, so there is no JavaScript and no fallback to maintain: where
    it is unsupported the links are simply already drawn. --------------- */
@@ -221,9 +324,82 @@ table.spec td { color: var(--muted); }
       <h1 id="r0">Every fact it holds, and every fact it decided not to hand over.</h1>
       <p class="lede">MemVault stores what you give it and explains what it hands back. One
       binary, no service to operate, no network required.</p>
-      <p>Every retrieval is recorded in an append-only, hash-chained ledger, so
-      &ldquo;why did the agent know that?&rdquo; always has an answer, and
-      &ldquo;forget this&rdquo; is something you can prove rather than trust.</p>
+    </div>
+
+    <div class="bleed">
+      <div class="term">
+        <span class="sig">$</span> memvault <span class="key">--data-dir</span> ./my-memory search <span class="key">--namespace</span> project <span class="key">--query</span> "deploy script" <span class="key">--max-tokens</span> 20
+        <span class="rid">retrieval_id: <b>f96a229c-4d63-4db8-834d-1b98877611dd</b></span>
+      </div>
+      <div class="prov-wrap" role="region" aria-label="Retrieval provenance table, scrolls horizontally" tabindex="0">
+        <table class="prov">
+          <thead>
+            <tr>
+              <th scope="col">fact_id</th>
+              <th scope="col">ann_rank</th>
+              <th scope="col">ann_dist</th>
+              <th scope="col">bm25_rk</th>
+              <th scope="col">bm25_score</th>
+              <th scope="col">rrf</th>
+              <th scope="col">decay_wt</th>
+              <th scope="col">final</th>
+              <th scope="col">outcome</th>
+              <th scope="col">tokens</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="kept">
+              <td>34e2001b-1603-45c5-abbe-f5fbcf31d4a8</td>
+              <td>0</td><td>0.3518</td><td>0</td><td>2.2232</td>
+              <td>0.0328</td><td>1.0000</td><td>0.0328</td>
+              <td class="out">Injected</td><td>15</td>
+            </tr>
+            <tr class="cut">
+              <td>fdaa5149-440e-4a42-b2e6-d67653f2871d</td>
+              <td>1</td><td>0.6311</td><td>-</td><td>-</td>
+              <td>0.0161</td><td>1.0000</td><td>0.0161</td>
+              <td class="out">CutByBudget</td><td>17</td>
+            </tr>
+            <tr class="cut">
+              <td>b5aa16a8-aa14-48cb-917d-1bc5d048f184</td>
+              <td>2</td><td>1.0000</td><td>-</td><td>-</td>
+              <td>0.0159</td><td>1.0000</td><td>0.0159</td>
+              <td class="out">CutByBudget</td><td>11</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <dl class="legend">
+        <dt>ann_rank / ann_dist</dt>
+        <dd>Where the fact placed on the vector axis, and how far out. A dash
+        means it never surfaced there at all.</dd>
+        <dt>bm25_rk / bm25_score</dt>
+        <dd>The same, for the keyword axis. A row ranked on both axes was found
+        two different ways.</dd>
+        <dt>rrf</dt>
+        <dd>The two ranks fused. Ranks only, never raw scores, since a cosine
+        distance and a BM25 score are not on the same scale.</dd>
+        <dt>decay_wt</dt>
+        <dd>How much age discounted it. 1.0000 is no discount, and a pinned
+        fact never decays.</dd>
+        <dt>final</dt>
+        <dd>rrf multiplied by decay_wt. This is what the ordering is by.</dd>
+        <dt>outcome</dt>
+        <dd>Injected reached the agent. CutByBudget lost to the token budget,
+        CutByK to the k limit, FilteredByTime was no longer valid at query
+        time.</dd>
+        <dt>tokens</dt>
+        <dd>What that fact costs you in context.</dd>
+      </dl>
+    </div>
+
+    <div class="follow">
+      <p class="note">Every candidate considered appears here, including the two
+      this budget cut. That is what makes a bad retrieval debuggable instead of
+      mysterious, and it is a ledger read rather than a re-run: pass that
+      retrieval_id back to <code>explain</code> any time later and the same
+      table comes out.</p>
     </div>
   </section>
 
