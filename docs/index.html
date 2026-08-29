@@ -1,527 +1,746 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MemVault: a local-first memory engine for AI agents</title>
-<meta name="description" content="MemVault stores what you give an agent and explains what it hands back. Append-only hash-chained ledger, hybrid retrieval, provable forgetting. One binary, no service, no network.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@110,600;110,700&family=JetBrains+Mono:wght@400;700&family=Public+Sans:wght@400;500&display=swap" rel="stylesheet">
-<style>
-:root {
-  /* Palette. The three accents are the `outcome` column's legend: a colour
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MemVault: a local-first memory engine for AI agents</title>
+    <meta
+      name="description"
+      content="MemVault stores what you give an agent and explains what it hands back. Append-only hash-chained ledger, hybrid retrieval, provable forgetting. One binary, no service, no network."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@110,600;110,700&family=JetBrains+Mono:wght@400;700&family=Public+Sans:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        /* Palette. The three accents are the `outcome` column's legend: a colour
      means the same thing in the table, the diagrams and the prose. */
-  --ink:       #0F1720;  /* ground */
-  --panel:     #17222E;  /* record surfaces */
-  --bone:      #E7EBEF;  /* text */
-  --brass:     #D2A63C;  /* verified, chain intact */
-  --verdigris: #59A98C;  /* injected, retained */
-  --clay:      #C8624F;  /* cut, erased, undecryptable */
+        --ink: #0f1720; /* ground */
+        --panel: #17222e; /* record surfaces */
+        --bone: #e7ebef; /* text */
+        --brass: #d2a63c; /* verified, chain intact */
+        --verdigris: #59a98c; /* injected, retained */
+        --clay: #c8624f; /* cut, erased, undecryptable */
 
-  --muted: color-mix(in srgb, var(--bone) 62%, var(--ink));
-  --faint: color-mix(in srgb, var(--bone) 38%, var(--ink));
-  --rule:  color-mix(in srgb, var(--bone) 16%, var(--ink));
-  --raise: color-mix(in srgb, var(--panel) 88%, var(--bone));
+        --muted: color-mix(in srgb, var(--bone) 62%, var(--ink));
+        --faint: color-mix(in srgb, var(--bone) 38%, var(--ink));
+        --rule: color-mix(in srgb, var(--bone) 16%, var(--ink));
+        --raise: color-mix(in srgb, var(--panel) 88%, var(--bone));
 
-  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
-  --body:    "Public Sans", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
-  --data:    "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+        --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+        --body:
+          "Public Sans", -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+        --data:
+          "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
 
-  --fs-display: clamp(2.25rem, 5vw, 3.4rem);
-  --fs-h2:      clamp(1.55rem, 3vw, 2.15rem);
-  --fs-lede:    clamp(1.05rem, 1.6vw, 1.25rem);
-  --fs-body:    1.0625rem;
-  --fs-data:    0.8125rem;
+        --fs-display: clamp(2.25rem, 5vw, 3.4rem);
+        --fs-h2: clamp(1.55rem, 3vw, 2.15rem);
+        --fs-lede: clamp(1.05rem, 1.6vw, 1.25rem);
+        --fs-body: 1.0625rem;
+        --fs-data: 0.8125rem;
 
-  --gutter: clamp(1.25rem, 5vw, 3rem);
-  --rail:   11rem;
-}
+        --gutter: clamp(1.25rem, 5vw, 3rem);
+        --rail: 11rem;
+      }
 
-*, *::before, *::after { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
-body {
-  margin: 0;
-  background: var(--ink);
-  color: var(--bone);
-  font: 400 var(--fs-body)/1.65 var(--body);
-  overflow-x: hidden;
-}
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      html {
+        -webkit-text-size-adjust: 100%;
+      }
+      body {
+        margin: 0;
+        background: var(--ink);
+        color: var(--bone);
+        font: 400 var(--fs-body)/1.65 var(--body);
+        overflow-x: hidden;
+      }
 
-h1, h2 {
-  font-family: var(--display);
-  font-variation-settings: "wdth" 110;
-  font-weight: 700;
-  line-height: 1.04;
-  letter-spacing: -0.015em;
-  margin: 0;
-  text-wrap: balance;
-}
-h1 { font-size: var(--fs-display); }
-h2 { font-size: var(--fs-h2); }
-p  { margin: 0 0 1.1em; max-width: 62ch; }
-a  { color: var(--brass); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+      h1,
+      h2 {
+        font-family: var(--display);
+        font-variation-settings: "wdth" 110;
+        font-weight: 700;
+        line-height: 1.04;
+        letter-spacing: -0.015em;
+        margin: 0;
+        text-wrap: balance;
+      }
+      h1 {
+        font-size: var(--fs-display);
+      }
+      h2 {
+        font-size: var(--fs-h2);
+      }
+      p {
+        margin: 0 0 1.1em;
+        max-width: 62ch;
+      }
+      a {
+        color: var(--brass);
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+      }
 
-:focus-visible {
-  outline: 2px solid var(--brass);
-  outline-offset: 3px;
-  border-radius: 2px;
-}
+      :focus-visible {
+        outline: 2px solid var(--brass);
+        outline-offset: 3px;
+        border-radius: 2px;
+      }
 
-.skip {
-  position: absolute; left: -9999px;
-  background: var(--brass); color: var(--ink);
-  padding: .6rem 1rem; font: 700 var(--fs-data) var(--data);
-}
-.skip:focus { left: var(--gutter); top: .75rem; z-index: 10; }
+      .skip {
+        position: absolute;
+        left: -9999px;
+        background: var(--brass);
+        color: var(--ink);
+        padding: 0.6rem 1rem;
+        font: 700 var(--fs-data) var(--data);
+      }
+      .skip:focus {
+        left: var(--gutter);
+        top: 0.75rem;
+        z-index: 10;
+      }
 
-.page {
-  max-width: calc(var(--rail) + 3rem + 68ch);
-  margin: 0 auto;
-  padding: 0 var(--gutter) 6rem;
-}
+      .page {
+        max-width: calc(var(--rail) + 3rem + 68ch);
+        margin: 0 auto;
+        padding: 0 var(--gutter) 6rem;
+      }
 
-/* ---- Sections are ledger records ------------------------------------- */
+      /* ---- Sections are ledger records ------------------------------------- */
 
-.record {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 1.5rem;
-  padding: clamp(3rem, 7vw, 5.5rem) 0;
-  border-top: 1px solid var(--rule);
-}
-.record:first-of-type { border-top: 0; }
+      .record {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.5rem;
+        padding: clamp(3rem, 7vw, 5.5rem) 0;
+        border-top: 1px solid var(--rule);
+      }
+      .record:first-of-type {
+        border-top: 0;
+      }
 
-.record__mark {
-  font: 400 var(--fs-data)/1.7 var(--data);
-  color: var(--faint);
-  position: relative;
-}
-.record__seq {
-  display: block;
-  color: var(--brass);
-  font-weight: 700;
-  letter-spacing: .08em;
-}
-.record__hash { display: block; white-space: nowrap; }
-.record__hash b { color: var(--muted); font-weight: 400; }
+      .record__mark {
+        font: 400 var(--fs-data)/1.7 var(--data);
+        color: var(--faint);
+        position: relative;
+      }
+      .record__seq {
+        display: block;
+        color: var(--brass);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+      }
+      .record__hash {
+        display: block;
+        white-space: nowrap;
+      }
+      .record__hash b {
+        color: var(--muted);
+        font-weight: 400;
+      }
 
-/* The chain: one link drawn per record, from this record's marker down to
+      /* The chain: one link drawn per record, from this record's marker down to
    the next one. Nothing here is decorative; a record's `prev` really is the
    record above it. */
-.record__link {
-  display: none;
-  position: absolute;
-  left: .3rem;
-  top: 6.2rem;
-  bottom: -1rem;
-  width: 1px;
-  background: linear-gradient(var(--brass), color-mix(in srgb, var(--brass) 25%, transparent));
-}
-.record__mark::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 5.1rem;
-  width: .625rem;
-  height: .625rem;
-  border: 1px solid var(--brass);
-  transform: rotate(45deg);
-  display: none;
-}
+      .record__link {
+        display: none;
+        position: absolute;
+        left: 0.3rem;
+        top: 6.2rem;
+        bottom: -1rem;
+        width: 1px;
+        background: linear-gradient(
+          var(--brass),
+          color-mix(in srgb, var(--brass) 25%, transparent)
+        );
+      }
+      .record__mark::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 5.1rem;
+        width: 0.625rem;
+        height: 0.625rem;
+        border: 1px solid var(--brass);
+        transform: rotate(45deg);
+        display: none;
+      }
 
-.eyebrow {
-  font: 700 var(--fs-data)/1 var(--data);
-  letter-spacing: .16em;
-  text-transform: uppercase;
-  color: var(--verdigris);
-  margin: 0 0 1rem;
-}
-.lede { font-size: var(--fs-lede); color: var(--muted); }
-.record h2 + p { margin-top: 1.2rem; }
+      .eyebrow {
+        font: 700 var(--fs-data)/1 var(--data);
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--verdigris);
+        margin: 0 0 1rem;
+      }
+      .lede {
+        font-size: var(--fs-lede);
+        color: var(--muted);
+      }
+      .record h2 + p {
+        margin-top: 1.2rem;
+      }
 
-@media (min-width: 64rem) {
-  .record { grid-template-columns: var(--rail) minmax(0, 1fr); gap: 3rem; }
-  .record__link, .record__mark::before { display: block; }
-  .record__mark { padding-left: 1.5rem; }
-  .record__link { left: .3rem; }
-}
+      @media (min-width: 64rem) {
+        .record {
+          grid-template-columns: var(--rail) minmax(0, 1fr);
+          gap: 3rem;
+        }
+        .record__link,
+        .record__mark::before {
+          display: block;
+        }
+        .record__mark {
+          padding-left: 1.5rem;
+        }
+        .record__link {
+          left: 0.3rem;
+        }
+      }
 
-/* ---- Surfaces --------------------------------------------------------- */
+      /* ---- Surfaces --------------------------------------------------------- */
 
-.panel {
-  background: var(--panel);
-  border: 1px solid var(--rule);
-  padding: clamp(1rem, 3vw, 1.5rem);
-}
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--rule);
+        padding: clamp(1rem, 3vw, 1.5rem);
+      }
 
-table.spec {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: .9375rem;
-  margin: 0 0 1.5rem;
-}
-table.spec th, table.spec td {
-  text-align: left;
-  vertical-align: top;
-  padding: .8rem 1rem .8rem 0;
-  border-top: 1px solid var(--rule);
-}
-table.spec th {
-  font: 700 var(--fs-data)/1.5 var(--data);
-  color: var(--brass);
-  white-space: nowrap;
-  width: 1%;
-}
-table.spec td { color: var(--muted); }
+      table.spec {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9375rem;
+        margin: 0 0 1.5rem;
+      }
+      table.spec th,
+      table.spec td {
+        text-align: left;
+        vertical-align: top;
+        padding: 0.8rem 1rem 0.8rem 0;
+        border-top: 1px solid var(--rule);
+      }
+      table.spec th {
+        font: 700 var(--fs-data)/1.5 var(--data);
+        color: var(--brass);
+        white-space: nowrap;
+        width: 1%;
+      }
+      table.spec td {
+        color: var(--muted);
+      }
 
-/* ---- Foot stamp ------------------------------------------------------- */
+      /* ---- Foot stamp ------------------------------------------------------- */
 
-.stamp {
-  margin-top: 3rem;
-  padding-top: 2rem;
-  border-top: 1px solid var(--rule);
-  font: 700 var(--fs-data)/1.6 var(--data);
-  color: var(--verdigris);
-  letter-spacing: .04em;
-}
-.stamp span { display: block; color: var(--faint); font-weight: 400; letter-spacing: 0; }
+      .stamp {
+        margin-top: 3rem;
+        padding-top: 2rem;
+        border-top: 1px solid var(--rule);
+        font: 700 var(--fs-data)/1.6 var(--data);
+        color: var(--verdigris);
+        letter-spacing: 0.04em;
+      }
+      .stamp span {
+        display: block;
+        color: var(--faint);
+        font-weight: 400;
+        letter-spacing: 0;
+      }
 
-/* ---- Hero: the provenance table ---------------------------------------
+      /* ---- Hero: the provenance table ---------------------------------------
    The table is the product's argument, so it is the hero rather than an
    illustration of one. Rows are the README's own, verbatim. */
 
-.bleed {
-  grid-column: 1 / -1;
-  min-width: 0;
-  width: min(100vw - 2 * var(--gutter), 74rem);
-  margin: 2.5rem 0 0 50%;
-  transform: translateX(-50%);
-}
-.follow { grid-column: 1 / -1; }
-@media (min-width: 64rem) { .follow { grid-column: 2; } }
-.note { margin: 0; }
+      .bleed {
+        grid-column: 1 / -1;
+        min-width: 0;
+        width: min(100vw - 2 * var(--gutter), 74rem);
+        margin: 2.5rem 0 0 50%;
+        transform: translateX(-50%);
+      }
+      .follow {
+        grid-column: 1 / -1;
+      }
+      @media (min-width: 64rem) {
+        .follow {
+          grid-column: 2;
+        }
+      }
+      .note {
+        margin: 0;
+      }
 
-.term {
-  background: var(--panel);
-  border: 1px solid var(--rule);
-  padding: 1rem 1.1rem;
-  font: 400 var(--fs-data)/1.75 var(--data);
-  color: var(--muted);
-  overflow-x: auto;
-}
-.term .sig { color: var(--verdigris); user-select: none; }
-.term .key { color: var(--bone); }
-.term .rid { display: block; margin-top: .9rem; color: var(--faint); }
-.term .rid b { color: var(--brass); font-weight: 400; }
+      .term {
+        background: var(--panel);
+        border: 1px solid var(--rule);
+        padding: 1rem 1.1rem;
+        font: 400 var(--fs-data)/1.75 var(--data);
+        color: var(--muted);
+        overflow-x: auto;
+      }
+      .term .sig {
+        color: var(--verdigris);
+        user-select: none;
+      }
+      .term .key {
+        color: var(--bone);
+      }
+      .term .rid {
+        display: block;
+        margin-top: 0.9rem;
+        color: var(--faint);
+      }
+      .term .rid b {
+        color: var(--brass);
+        font-weight: 400;
+      }
 
-.prov-wrap {
-  overflow-x: auto;
-  background: var(--panel);
-  border: 1px solid var(--rule);
-  border-top: 0;
-}
-.prov-wrap:focus-visible { outline-offset: -2px; }
+      .prov-wrap {
+        overflow-x: auto;
+        background: var(--panel);
+        border: 1px solid var(--rule);
+        border-top: 0;
+      }
+      .prov-wrap:focus-visible {
+        outline-offset: -2px;
+      }
 
-table.prov {
-  border-collapse: collapse;
-  min-width: 48rem;
-  width: 100%;
-  font: 400 var(--fs-data)/1 var(--data);
-  font-variant-numeric: tabular-nums;
-}
-table.prov th, table.prov td {
-  padding: .7rem .7rem;
-  text-align: right;
-  white-space: nowrap;
-}
-table.prov th:first-child, table.prov td:first-child { text-align: left; }
-table.prov thead th {
-  font-weight: 400;
-  color: var(--faint);
-  border-bottom: 1px solid var(--rule);
-}
-table.prov tbody td {
-  border-top: 1px solid color-mix(in srgb, var(--rule) 55%, transparent);
-}
-.prov .out { font-weight: 700; }
-.prov .kept .out { color: var(--verdigris); }
-.prov .cut { color: var(--faint); }
-.prov .cut .out { color: var(--clay); }
-.prov .cut td:first-child {
-  text-decoration: line-through;
-  text-decoration-color: var(--clay);
-  text-decoration-thickness: 1px;
-}
+      table.prov {
+        border-collapse: collapse;
+        min-width: 48rem;
+        width: 100%;
+        font: 400 var(--fs-data)/1 var(--data);
+        font-variant-numeric: tabular-nums;
+      }
+      table.prov th,
+      table.prov td {
+        padding: 0.7rem 0.7rem;
+        text-align: right;
+        white-space: nowrap;
+      }
+      table.prov th:first-child,
+      table.prov td:first-child {
+        text-align: left;
+      }
+      table.prov thead th {
+        font-weight: 400;
+        color: var(--faint);
+        border-bottom: 1px solid var(--rule);
+      }
+      table.prov tbody td {
+        border-top: 1px solid color-mix(in srgb, var(--rule) 55%, transparent);
+      }
+      .prov .out {
+        font-weight: 700;
+      }
+      .prov .kept .out {
+        color: var(--verdigris);
+      }
+      .prov .cut {
+        color: var(--faint);
+      }
+      .prov .cut .out {
+        color: var(--clay);
+      }
+      .prov .cut td:first-child {
+        text-decoration: line-through;
+        text-decoration-color: var(--clay);
+        text-decoration-thickness: 1px;
+      }
 
-.legend {
-  display: grid;
-  gap: .5rem 2rem;
-  margin: 1.75rem 0 0;
-  font-size: .9375rem;
-}
-.legend dt {
-  font: 700 var(--fs-data)/1.6 var(--data);
-  color: var(--brass);
-}
-.legend dd { margin: 0 0 .9rem; color: var(--muted); max-width: 62ch; }
+      .legend {
+        display: grid;
+        gap: 0.5rem 2rem;
+        margin: 1.75rem 0 0;
+        font-size: 0.9375rem;
+      }
+      .legend dt {
+        font: 700 var(--fs-data)/1.6 var(--data);
+        color: var(--brass);
+      }
+      .legend dd {
+        margin: 0 0 0.9rem;
+        color: var(--muted);
+        max-width: 62ch;
+      }
 
-@media (min-width: 48rem) {
-  .legend { grid-template-columns: 11rem minmax(0, 1fr); }
-  .legend dt { text-align: right; padding-top: .15rem; }
-}
+      @media (min-width: 48rem) {
+        .legend {
+          grid-template-columns: 11rem minmax(0, 1fr);
+        }
+        .legend dt {
+          text-align: right;
+          padding-top: 0.15rem;
+        }
+      }
 
-/* One load sequence: rows settle in rank order, then the two the budget cut
+      /* One load sequence: rows settle in rank order, then the two the budget cut
    fade back and take their strike. Everything above is the finished state,
    so reduced motion (and no CSS animation at all) lands on it directly. */
 
-@media (prefers-reduced-motion: no-preference) {
-  .prov tbody tr { animation: settle .45s cubic-bezier(.2,.7,.3,1) backwards; }
-  .prov tbody tr:nth-child(1) { animation-delay: .2s; }
-  .prov tbody tr:nth-child(2) { animation-delay: .35s; }
-  .prov tbody tr:nth-child(3) { animation-delay: .5s; }
-  .prov .cut { animation: settle .45s cubic-bezier(.2,.7,.3,1) backwards,
-                          fade .4s ease 1.15s backwards; }
-  .prov .cut td:first-child { animation: strike .45s ease-out 1.25s backwards; }
-  .prov .cut .out { animation: fade .4s ease 1.15s backwards; }
+      @media (prefers-reduced-motion: no-preference) {
+        .prov tbody tr {
+          animation: settle 0.45s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+        }
+        .prov tbody tr:nth-child(1) {
+          animation-delay: 0.2s;
+        }
+        .prov tbody tr:nth-child(2) {
+          animation-delay: 0.35s;
+        }
+        .prov tbody tr:nth-child(3) {
+          animation-delay: 0.5s;
+        }
+        .prov .cut {
+          animation:
+            settle 0.45s cubic-bezier(0.2, 0.7, 0.3, 1) backwards,
+            fade 0.4s ease 1.15s backwards;
+        }
+        .prov .cut td:first-child {
+          animation: strike 0.45s ease-out 1.25s backwards;
+        }
+        .prov .cut .out {
+          animation: fade 0.4s ease 1.15s backwards;
+        }
 
-  @keyframes settle { from { opacity: 0; transform: translateY(.6rem); } }
-  @keyframes fade { from { color: var(--bone); } }
-  @keyframes strike { from { text-decoration-color: transparent; } }
-}
+        @keyframes settle {
+          from {
+            opacity: 0;
+            transform: translateY(0.6rem);
+          }
+        }
+        @keyframes fade {
+          from {
+            color: var(--bone);
+          }
+        }
+        @keyframes strike {
+          from {
+            text-decoration-color: transparent;
+          }
+        }
+      }
 
-/* ---- Motion: the chain draws itself as you scroll. Native scroll-driven
+      /* ---- Motion: the chain draws itself as you scroll. Native scroll-driven
    animation, so there is no JavaScript and no fallback to maintain: where
    it is unsupported the links are simply already drawn. --------------- */
 
-@supports (animation-timeline: view()) {
-  @media (prefers-reduced-motion: no-preference) and (min-width: 64rem) {
-    .record__link {
-      transform-origin: top;
-      animation: draw linear both;
-      animation-timeline: view();
-      animation-range: entry 25% cover 45%;
-    }
-    @keyframes draw { from { scale: 1 0; } to { scale: 1 1; } }
-  }
-}
-</style>
-</head>
-<body>
-<a class="skip" href="#start">Skip to content</a>
+      @supports (animation-timeline: view()) {
+        @media (prefers-reduced-motion: no-preference) and (min-width: 64rem) {
+          .record__link {
+            transform-origin: top;
+            animation: draw linear both;
+            animation-timeline: view();
+            animation-range: entry 25% cover 45%;
+          }
+          @keyframes draw {
+            from {
+              scale: 1 0;
+            }
+            to {
+              scale: 1 1;
+            }
+          }
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#start">Skip to content</a>
 
-<main class="page" id="start">
+    <main class="page" id="start">
+      <section class="record" aria-labelledby="r0">
+        <div class="record__mark">
+          <span class="record__seq">SEQ 00</span>
+          <span class="record__hash">hash <b>a1f0c2d4</b></span>
+          <span class="record__hash">prev <b>00000000</b></span>
+          <span class="record__link" aria-hidden="true"></span>
+        </div>
+        <div>
+          <p class="eyebrow">Local-first memory for agents</p>
+          <h1 id="r0">
+            Every fact it holds, and every fact it decided not to hand over.
+          </h1>
+          <p class="lede">
+            MemVault stores what you give it and explains what it hands back.
+            One binary, no service to operate, no network required.
+          </p>
+        </div>
 
-  <section class="record" aria-labelledby="r0">
-    <div class="record__mark">
-      <span class="record__seq">SEQ 00</span>
-      <span class="record__hash">hash <b>a1f0c2d4</b></span>
-      <span class="record__hash">prev <b>00000000</b></span>
-      <span class="record__link" aria-hidden="true"></span>
-    </div>
-    <div>
-      <p class="eyebrow">Local-first memory for agents</p>
-      <h1 id="r0">Every fact it holds, and every fact it decided not to hand over.</h1>
-      <p class="lede">MemVault stores what you give it and explains what it hands back. One
-      binary, no service to operate, no network required.</p>
-    </div>
+        <div class="bleed">
+          <div class="term">
+            <span class="sig">$</span> memvault
+            <span class="key">--data-dir</span> ./my-memory search
+            <span class="key">--namespace</span> project
+            <span class="key">--query</span> "deploy script"
+            <span class="key">--max-tokens</span> 20
+            <span class="rid"
+              >retrieval_id: <b>f96a229c-4d63-4db8-834d-1b98877611dd</b></span
+            >
+          </div>
+          <div
+            class="prov-wrap"
+            role="region"
+            aria-label="Retrieval provenance table, scrolls horizontally"
+            tabindex="0"
+          >
+            <table class="prov">
+              <thead>
+                <tr>
+                  <th scope="col">fact_id</th>
+                  <th scope="col">ann_rank</th>
+                  <th scope="col">ann_dist</th>
+                  <th scope="col">bm25_rk</th>
+                  <th scope="col">bm25_score</th>
+                  <th scope="col">rrf</th>
+                  <th scope="col">decay_wt</th>
+                  <th scope="col">final</th>
+                  <th scope="col">outcome</th>
+                  <th scope="col">tokens</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="kept">
+                  <td>34e2001b-1603-45c5-abbe-f5fbcf31d4a8</td>
+                  <td>0</td>
+                  <td>0.3518</td>
+                  <td>0</td>
+                  <td>2.2232</td>
+                  <td>0.0328</td>
+                  <td>1.0000</td>
+                  <td>0.0328</td>
+                  <td class="out">Injected</td>
+                  <td>15</td>
+                </tr>
+                <tr class="cut">
+                  <td>fdaa5149-440e-4a42-b2e6-d67653f2871d</td>
+                  <td>1</td>
+                  <td>0.6311</td>
+                  <td>-</td>
+                  <td>-</td>
+                  <td>0.0161</td>
+                  <td>1.0000</td>
+                  <td>0.0161</td>
+                  <td class="out">CutByBudget</td>
+                  <td>17</td>
+                </tr>
+                <tr class="cut">
+                  <td>b5aa16a8-aa14-48cb-917d-1bc5d048f184</td>
+                  <td>2</td>
+                  <td>1.0000</td>
+                  <td>-</td>
+                  <td>-</td>
+                  <td>0.0159</td>
+                  <td>1.0000</td>
+                  <td>0.0159</td>
+                  <td class="out">CutByBudget</td>
+                  <td>11</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-    <div class="bleed">
-      <div class="term">
-        <span class="sig">$</span> memvault <span class="key">--data-dir</span> ./my-memory search <span class="key">--namespace</span> project <span class="key">--query</span> "deploy script" <span class="key">--max-tokens</span> 20
-        <span class="rid">retrieval_id: <b>f96a229c-4d63-4db8-834d-1b98877611dd</b></span>
-      </div>
-      <div class="prov-wrap" role="region" aria-label="Retrieval provenance table, scrolls horizontally" tabindex="0">
-        <table class="prov">
-          <thead>
-            <tr>
-              <th scope="col">fact_id</th>
-              <th scope="col">ann_rank</th>
-              <th scope="col">ann_dist</th>
-              <th scope="col">bm25_rk</th>
-              <th scope="col">bm25_score</th>
-              <th scope="col">rrf</th>
-              <th scope="col">decay_wt</th>
-              <th scope="col">final</th>
-              <th scope="col">outcome</th>
-              <th scope="col">tokens</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr class="kept">
-              <td>34e2001b-1603-45c5-abbe-f5fbcf31d4a8</td>
-              <td>0</td><td>0.3518</td><td>0</td><td>2.2232</td>
-              <td>0.0328</td><td>1.0000</td><td>0.0328</td>
-              <td class="out">Injected</td><td>15</td>
-            </tr>
-            <tr class="cut">
-              <td>fdaa5149-440e-4a42-b2e6-d67653f2871d</td>
-              <td>1</td><td>0.6311</td><td>-</td><td>-</td>
-              <td>0.0161</td><td>1.0000</td><td>0.0161</td>
-              <td class="out">CutByBudget</td><td>17</td>
-            </tr>
-            <tr class="cut">
-              <td>b5aa16a8-aa14-48cb-917d-1bc5d048f184</td>
-              <td>2</td><td>1.0000</td><td>-</td><td>-</td>
-              <td>0.0159</td><td>1.0000</td><td>0.0159</td>
-              <td class="out">CutByBudget</td><td>11</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+          <dl class="legend">
+            <dt>ann_rank / ann_dist</dt>
+            <dd>
+              Where the fact placed on the vector axis, and how far out. A dash
+              means it never surfaced there at all.
+            </dd>
+            <dt>bm25_rk / bm25_score</dt>
+            <dd>
+              The same, for the keyword axis. A row ranked on both axes was
+              found two different ways.
+            </dd>
+            <dt>rrf</dt>
+            <dd>
+              The two ranks fused. Ranks only, never raw scores, since a cosine
+              distance and a BM25 score are not on the same scale.
+            </dd>
+            <dt>decay_wt</dt>
+            <dd>
+              How much age discounted it. 1.0000 is no discount, and a pinned
+              fact never decays.
+            </dd>
+            <dt>final</dt>
+            <dd>
+              rrf multiplied by decay_wt. This is what the ordering is by.
+            </dd>
+            <dt>outcome</dt>
+            <dd>
+              Injected reached the agent. CutByBudget lost to the token budget,
+              CutByK to the k limit, FilteredByTime was no longer valid at query
+              time.
+            </dd>
+            <dt>tokens</dt>
+            <dd>What that fact costs you in context.</dd>
+          </dl>
+        </div>
 
-      <dl class="legend">
-        <dt>ann_rank / ann_dist</dt>
-        <dd>Where the fact placed on the vector axis, and how far out. A dash
-        means it never surfaced there at all.</dd>
-        <dt>bm25_rk / bm25_score</dt>
-        <dd>The same, for the keyword axis. A row ranked on both axes was found
-        two different ways.</dd>
-        <dt>rrf</dt>
-        <dd>The two ranks fused. Ranks only, never raw scores, since a cosine
-        distance and a BM25 score are not on the same scale.</dd>
-        <dt>decay_wt</dt>
-        <dd>How much age discounted it. 1.0000 is no discount, and a pinned
-        fact never decays.</dd>
-        <dt>final</dt>
-        <dd>rrf multiplied by decay_wt. This is what the ordering is by.</dd>
-        <dt>outcome</dt>
-        <dd>Injected reached the agent. CutByBudget lost to the token budget,
-        CutByK to the k limit, FilteredByTime was no longer valid at query
-        time.</dd>
-        <dt>tokens</dt>
-        <dd>What that fact costs you in context.</dd>
-      </dl>
-    </div>
+        <div class="follow">
+          <p class="note">
+            Every candidate considered appears here, including the two this
+            budget cut. That is what makes a bad retrieval debuggable instead of
+            mysterious, and it is a ledger read rather than a re-run: pass that
+            retrieval_id back to <code>explain</code> any time later and the
+            same table comes out.
+          </p>
+        </div>
+      </section>
 
-    <div class="follow">
-      <p class="note">Every candidate considered appears here, including the two
-      this budget cut. That is what makes a bad retrieval debuggable instead of
-      mysterious, and it is a ledger read rather than a re-run: pass that
-      retrieval_id back to <code>explain</code> any time later and the same
-      table comes out.</p>
-    </div>
-  </section>
+      <section class="record" aria-labelledby="r1">
+        <div class="record__mark">
+          <span class="record__seq">SEQ 01</span>
+          <span class="record__hash">hash <b>6b39e07c</b></span>
+          <span class="record__hash">prev <b>a1f0c2d4</b></span>
+          <span class="record__link" aria-hidden="true"></span>
+        </div>
+        <div>
+          <p class="eyebrow">How it works</p>
+          <h2 id="r1">Two indexes, fused by rank, packed to a budget.</h2>
+          <p>
+            A vector index and a keyword index answer every query independently.
+            Their ranks are fused, weighted by decay, and packed to fit the
+            token budget you set. What the fusion cut is written down next to
+            what it kept.
+          </p>
+        </div>
+      </section>
 
-  <section class="record" aria-labelledby="r1">
-    <div class="record__mark">
-      <span class="record__seq">SEQ 01</span>
-      <span class="record__hash">hash <b>6b39e07c</b></span>
-      <span class="record__hash">prev <b>a1f0c2d4</b></span>
-      <span class="record__link" aria-hidden="true"></span>
-    </div>
-    <div>
-      <p class="eyebrow">How it works</p>
-      <h2 id="r1">Two indexes, fused by rank, packed to a budget.</h2>
-      <p>A vector index and a keyword index answer every query independently.
-      Their ranks are fused, weighted by decay, and packed to fit the token
-      budget you set. What the fusion cut is written down next to what it kept.</p>
-    </div>
-  </section>
+      <section class="record" aria-labelledby="r2">
+        <div class="record__mark">
+          <span class="record__seq">SEQ 02</span>
+          <span class="record__hash">hash <b>d84c1fa2</b></span>
+          <span class="record__hash">prev <b>6b39e07c</b></span>
+          <span class="record__link" aria-hidden="true"></span>
+        </div>
+        <div>
+          <p class="eyebrow">Run it</p>
+          <h2 id="r2">Four ways in, one engine behind them.</h2>
+          <p>
+            The CLI, an MCP server over stdio, an optional gRPC surface, and
+            Python in-process. Every one of them returns the same provenance.
+          </p>
+        </div>
+      </section>
 
-  <section class="record" aria-labelledby="r2">
-    <div class="record__mark">
-      <span class="record__seq">SEQ 02</span>
-      <span class="record__hash">hash <b>d84c1fa2</b></span>
-      <span class="record__hash">prev <b>6b39e07c</b></span>
-      <span class="record__link" aria-hidden="true"></span>
-    </div>
-    <div>
-      <p class="eyebrow">Run it</p>
-      <h2 id="r2">Four ways in, one engine behind them.</h2>
-      <p>The CLI, an MCP server over stdio, an optional gRPC surface, and Python
-      in-process. Every one of them returns the same provenance.</p>
-    </div>
-  </section>
+      <section class="record" aria-labelledby="r3">
+        <div class="record__mark">
+          <span class="record__seq">SEQ 03</span>
+          <span class="record__hash">hash <b>2e75b9c1</b></span>
+          <span class="record__hash">prev <b>d84c1fa2</b></span>
+          <span class="record__link" aria-hidden="true"></span>
+        </div>
+        <div>
+          <p class="eyebrow">Provable forgetting</p>
+          <h2 id="r3">Erase a fact and the chain still verifies.</h2>
+          <p>
+            Cryptographic erase: the key dies, the record stays, the chain
+            holds. The fact leaves search, its content hash survives, and nobody
+            can recover what it said.
+          </p>
+        </div>
+      </section>
 
-  <section class="record" aria-labelledby="r3">
-    <div class="record__mark">
-      <span class="record__seq">SEQ 03</span>
-      <span class="record__hash">hash <b>2e75b9c1</b></span>
-      <span class="record__hash">prev <b>d84c1fa2</b></span>
-      <span class="record__link" aria-hidden="true"></span>
-    </div>
-    <div>
-      <p class="eyebrow">Provable forgetting</p>
-      <h2 id="r3">Erase a fact and the chain still verifies.</h2>
-      <p>Cryptographic erase: the key dies, the record stays, the chain holds.
-      The fact leaves search, its content hash survives, and nobody can recover
-      what it said.</p>
-    </div>
-  </section>
+      <section class="record" aria-labelledby="r4">
+        <div class="record__mark">
+          <span class="record__seq">SEQ 04</span>
+          <span class="record__hash">hash <b>90fa3d68</b></span>
+          <span class="record__hash">prev <b>2e75b9c1</b></span>
+          <span class="record__link" aria-hidden="true"></span>
+        </div>
+        <div>
+          <p class="eyebrow">Bitemporal</p>
+          <h2 id="r4">What was true, and what the engine believed.</h2>
+          <p>
+            Two axes, both queryable. Ask what held at a moment, or ask what
+            MemVault thought held at that moment. They are not the same
+            question, and a memory that conflates them cannot explain itself.
+          </p>
+        </div>
+      </section>
 
-  <section class="record" aria-labelledby="r4">
-    <div class="record__mark">
-      <span class="record__seq">SEQ 04</span>
-      <span class="record__hash">hash <b>90fa3d68</b></span>
-      <span class="record__hash">prev <b>2e75b9c1</b></span>
-      <span class="record__link" aria-hidden="true"></span>
-    </div>
-    <div>
-      <p class="eyebrow">Bitemporal</p>
-      <h2 id="r4">What was true, and what the engine believed.</h2>
-      <p>Two axes, both queryable. Ask what held at a moment, or ask what
-      MemVault thought held at that moment. They are not the same question, and
-      a memory that conflates them cannot explain itself.</p>
-    </div>
-  </section>
+      <section class="record" aria-labelledby="r5">
+        <div class="record__mark">
+          <span class="record__seq">SEQ 05</span>
+          <span class="record__hash">hash <b>47c8e215</b></span>
+          <span class="record__hash">prev <b>90fa3d68</b></span>
+          <span class="record__link" aria-hidden="true"></span>
+        </div>
+        <div>
+          <p class="eyebrow">Install</p>
+          <h2 id="r5">Hand it to your agent.</h2>
+          <p>
+            Paste one prompt into the agent you already use and let it clone,
+            build, wire up the MCP config, and prove the round trip works.
+          </p>
+        </div>
+      </section>
 
-  <section class="record" aria-labelledby="r5">
-    <div class="record__mark">
-      <span class="record__seq">SEQ 05</span>
-      <span class="record__hash">hash <b>47c8e215</b></span>
-      <span class="record__hash">prev <b>90fa3d68</b></span>
-      <span class="record__link" aria-hidden="true"></span>
-    </div>
-    <div>
-      <p class="eyebrow">Install</p>
-      <h2 id="r5">Hand it to your agent.</h2>
-      <p>Paste one prompt into the agent you already use and let it clone,
-      build, wire up the MCP config, and prove the round trip works.</p>
-    </div>
-  </section>
-
-  <section class="record" aria-labelledby="r6">
-    <div class="record__mark">
-      <span class="record__seq">SEQ 06</span>
-      <span class="record__hash">hash <b>bb1d6094</b></span>
-      <span class="record__hash">prev <b>47c8e215</b></span>
-    </div>
-    <div>
-      <p class="eyebrow">Known limits</p>
-      <h2 id="r6">Stated plainly, because each one otherwise looks like a bug.</h2>
-      <table class="spec">
-        <tbody>
-          <tr>
-            <th scope="row">Embeddings are caller-supplied</th>
-            <td>MemVault runs no model. The MCP and Python surfaces accept an
-            <code>embedding</code> and fall back to keyword-only retrieval
-            without one.</td>
-          </tr>
-          <tr>
-            <th scope="row">Namespaces share a candidate pool</th>
-            <td>A search never returns another namespace&rsquo;s facts, but a
-            namespace holding far more facts than its neighbours can crowd them
-            out of the pool and cost them recall.</td>
-          </tr>
-          <tr>
-            <th scope="row">Token counts are estimates</th>
-            <td>Ciphertext bytes / 4, not a tokenizer. Close enough for English
-            prose, drifting on code.</td>
-          </tr>
-          <tr>
-            <th scope="row">Decay measures from a fact&rsquo;s own start</th>
-            <td>Not from last access, so retrieval does not yet reinforce a fact
-            against decay.</td>
-          </tr>
-        </tbody>
-      </table>
-      <p class="stamp">chain verified from seq 0
-        <span>MIT OR Apache-2.0 &middot; <a href="https://github.com/swap-mitra/memvault">github.com/swap-mitra/memvault</a></span>
-      </p>
-    </div>
-  </section>
-
-</main>
-</body>
+      <section class="record" aria-labelledby="r6">
+        <div class="record__mark">
+          <span class="record__seq">SEQ 06</span>
+          <span class="record__hash">hash <b>bb1d6094</b></span>
+          <span class="record__hash">prev <b>47c8e215</b></span>
+        </div>
+        <div>
+          <p class="eyebrow">Known limits</p>
+          <h2 id="r6">
+            Stated plainly, because each one otherwise looks like a bug.
+          </h2>
+          <table class="spec">
+            <tbody>
+              <tr>
+                <th scope="row">Embeddings are caller-supplied</th>
+                <td>
+                  MemVault runs no model. The MCP and Python surfaces accept an
+                  <code>embedding</code> and fall back to keyword-only retrieval
+                  without one.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Namespaces share a candidate pool</th>
+                <td>
+                  A search never returns another namespace&rsquo;s facts, but a
+                  namespace holding far more facts than its neighbours can crowd
+                  them out of the pool and cost them recall.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Token counts are estimates</th>
+                <td>
+                  Ciphertext bytes / 4, not a tokenizer. Close enough for
+                  English prose, drifting on code.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">
+                  Decay measures from a fact&rsquo;s own start
+                </th>
+                <td>
+                  Not from last access, so retrieval does not yet reinforce a
+                  fact against decay.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="stamp">
+            chain verified from seq 0
+            <span
+              >MIT OR Apache-2.0 &middot;
+              <a href="https://github.com/swap-mitra/memvault"
+                >github.com/swap-mitra/memvault</a
+              ></span
+            >
+          </p>
+        </div>
+      </section>
+    </main>
+  </body>
 </html>
