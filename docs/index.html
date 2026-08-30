@@ -27,10 +27,10 @@
         --bone: #e7ebef; /* text */
         --brass: #d2a63c; /* verified, chain intact */
         --verdigris: #59a98c; /* injected, retained */
-        --clay: #c8624f; /* cut, erased, undecryptable */
+        --clay: #d0705d; /* cut, erased, undecryptable */
 
-        --muted: color-mix(in srgb, var(--bone) 62%, var(--ink));
-        --faint: color-mix(in srgb, var(--bone) 38%, var(--ink));
+        --muted: color-mix(in srgb, var(--bone) 70%, var(--ink));
+        --faint: color-mix(in srgb, var(--bone) 55%, var(--ink));
         --rule: color-mix(in srgb, var(--bone) 16%, var(--ink));
         --raise: color-mix(in srgb, var(--panel) 88%, var(--bone));
 
@@ -432,6 +432,180 @@
         }
       }
 
+      /* ---- Figures ----------------------------------------------------------
+   Hand-drawn SVG, no diagram library. Every colour comes through a class so
+   the palette stays defined in one place, and the accents mean here what they
+   mean in the hero table: brass is the chain, clay is what was cut or erased. */
+
+      .fig {
+        overflow-x: auto;
+        margin: 2rem 0;
+      }
+      .fig svg {
+        display: block;
+        width: 100%;
+        min-width: 21rem;
+        max-width: 30rem;
+      }
+      .bleed.fig {
+        margin: 2.5rem 0 0 50%;
+      }
+      .bleed.fig svg {
+        min-width: 52rem;
+        max-width: none;
+      }
+      .fig text {
+        font-family: var(--data);
+        font-size: 13px;
+        fill: var(--muted);
+      }
+      .fig .box {
+        fill: var(--panel);
+        stroke: var(--rule);
+      }
+      .fig .lbl {
+        fill: var(--bone);
+        font-weight: 700;
+      }
+      .fig .dim {
+        fill: var(--faint);
+        font-size: 11px;
+      }
+      .fig .wire {
+        fill: none;
+        stroke: var(--brass);
+      }
+      .fig .read {
+        fill: none;
+        stroke: var(--muted);
+      }
+      .fig .dash {
+        stroke-dasharray: 5 4;
+      }
+      .fig .band {
+        fill: var(--brass);
+        fill-opacity: 0.14;
+        stroke: var(--brass);
+      }
+      .fig .ink-brass {
+        fill: var(--brass);
+      }
+      .fig .ink-muted {
+        fill: var(--muted);
+      }
+      .fig .ink-clay {
+        fill: var(--clay);
+      }
+      .fig .ink-verdigris {
+        fill: var(--verdigris);
+      }
+      .cap {
+        font-size: 0.9375rem;
+        color: var(--faint);
+        margin: 0.75rem 0 0;
+      }
+
+      /* ---- Command blocks and their copy button ------------------------------
+   The button ships hidden and the script reveals it, so a reader without
+   JavaScript never sees a control that cannot work. */
+
+      .cmd {
+        position: relative;
+        margin: 1.5rem 0;
+      }
+      pre {
+        background: var(--panel);
+        border: 1px solid var(--rule);
+        margin: 0;
+        padding: 1rem 1.1rem;
+        overflow-x: auto;
+        font: 400 var(--fs-data)/1.75 var(--data);
+        color: var(--muted);
+      }
+      pre b {
+        color: var(--bone);
+        font-weight: 400;
+      }
+      pre .cm {
+        color: var(--faint);
+      }
+      .copy {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        background: var(--raise);
+        color: var(--muted);
+        border: 1px solid var(--rule);
+        padding: 0.25rem 0.55rem;
+        font: 400 11px/1.4 var(--data);
+        cursor: pointer;
+      }
+      .copy:hover {
+        color: var(--bone);
+      }
+      @media (max-width: 34rem) {
+        .copy {
+          position: static;
+          display: block;
+          margin: 0 0 0.5rem auto;
+        }
+      }
+      code {
+        font: 400 0.9375em/1.4 var(--data);
+        color: var(--bone);
+      }
+      .warn {
+        border-left: 2px solid var(--clay);
+        padding-left: 1rem;
+        color: var(--muted);
+      }
+
+      /* ---- Transports: one tabbed panel --------------------------------------
+   Every panel is in the document. The tablist is inert without the script,
+   so it stays hidden until the script claims the panel. */
+
+      .tabs {
+        margin: 1.75rem 0 0;
+      }
+      .tabs:not([data-js]) [role="tablist"] {
+        display: none;
+      }
+      .tabs [role="tablist"] {
+        display: flex;
+        gap: 0.25rem;
+        overflow-x: auto;
+        border-bottom: 1px solid var(--rule);
+      }
+      .tabs [role="tab"] {
+        background: none;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        color: var(--muted);
+        font: 700 var(--fs-data)/1 var(--data);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 0.7rem 0.9rem;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .tabs [role="tab"][aria-selected="true"] {
+        color: var(--brass);
+        border-bottom-color: var(--brass);
+      }
+      .tabs [role="tabpanel"] {
+        padding-top: 1.25rem;
+      }
+      .tabs h3 {
+        font: 700 var(--fs-data)/1 var(--data);
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--verdigris);
+        margin: 0 0 1rem;
+      }
+      .tabs[data-js] h3 {
+        display: none;
+      }
+
       /* ---- Motion: the chain draws itself as you scroll. Native scroll-driven
    animation, so there is no JavaScript and no fallback to maintain: where
    it is unsupported the links are simply already drawn. --------------- */
@@ -615,6 +789,162 @@
             what it kept.
           </p>
         </div>
+
+        <div
+          class="bleed fig"
+          role="region"
+          aria-label="Diagram of the write and read paths, scrolls horizontally"
+          tabindex="0"
+        >
+          <svg viewBox="0 0 960 290" role="img" aria-labelledby="d1t d1d">
+            <title id="d1t">The write path and the read path</title>
+            <desc id="d1d">
+              memory_write appends to the hash-chained ledger, and the ledger
+              builds both the vector index and the keyword index. memory_search
+              queries the two indexes; their ranks are fused, weighted by decay
+              and packed to a token budget before the context reaches the agent.
+              That decision is appended to the ledger as a retrieval record,
+              which memory_explain replays by retrieval_id.
+            </desc>
+            <defs>
+              <marker
+                id="arrow-write"
+                viewBox="0 0 8 8"
+                refX="7"
+                refY="4"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto"
+              >
+                <path d="M0 0 8 4 0 8z" class="ink-brass" />
+              </marker>
+              <marker
+                id="arrow-read"
+                viewBox="0 0 8 8"
+                refX="7"
+                refY="4"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto"
+              >
+                <path d="M0 0 8 4 0 8z" class="ink-muted" />
+              </marker>
+            </defs>
+
+            <rect class="box" x="10" y="24" width="132" height="34" />
+            <text class="lbl" x="76" y="46" text-anchor="middle">
+              memory_write
+            </text>
+
+            <rect class="box" x="180" y="16" width="160" height="50" />
+            <text class="lbl" x="260" y="38" text-anchor="middle">
+              hash-chained ledger
+            </text>
+            <text class="dim" x="260" y="55" text-anchor="middle">
+              redb, append-only
+            </text>
+
+            <rect class="box" x="210" y="118" width="130" height="34" />
+            <text class="lbl" x="275" y="140" text-anchor="middle">
+              memory_search
+            </text>
+
+            <rect class="box" x="390" y="16" width="140" height="48" />
+            <text class="lbl" x="460" y="38" text-anchor="middle">
+              vector index
+            </text>
+            <text class="dim" x="460" y="55" text-anchor="middle">usearch</text>
+
+            <rect class="box" x="390" y="110" width="140" height="48" />
+            <text class="lbl" x="460" y="132" text-anchor="middle">
+              keyword index
+            </text>
+            <text class="dim" x="460" y="149" text-anchor="middle">
+              tantivy
+            </text>
+
+            <rect class="box" x="580" y="64" width="120" height="40" />
+            <text class="lbl" x="640" y="89" text-anchor="middle">
+              RRF fusion
+            </text>
+
+            <rect class="box" x="580" y="150" width="120" height="44" />
+            <text class="lbl" x="640" y="170" text-anchor="middle">
+              decay +
+            </text>
+            <text class="lbl" x="640" y="186" text-anchor="middle">budget</text>
+
+            <rect class="box" x="760" y="150" width="190" height="44" />
+            <text class="lbl" x="855" y="170" text-anchor="middle">
+              context handed
+            </text>
+            <text class="lbl" x="855" y="186" text-anchor="middle">
+              to the agent
+            </text>
+
+            <rect class="box" x="10" y="180" width="150" height="34" />
+            <text class="lbl" x="85" y="202" text-anchor="middle">
+              memory_explain
+            </text>
+
+            <path class="wire" d="M142 41h38" marker-end="url(#arrow-write)" />
+            <path
+              class="wire"
+              d="M340 41h16v-13h30"
+              marker-end="url(#arrow-write)"
+            />
+            <path
+              class="wire"
+              d="M356 41v81h30"
+              marker-end="url(#arrow-write)"
+            />
+
+            <path
+              class="read"
+              d="M340 135h32V48h14"
+              marker-end="url(#arrow-read)"
+            />
+            <path
+              class="read"
+              d="M372 135v11h14"
+              marker-end="url(#arrow-read)"
+            />
+            <path
+              class="read"
+              d="M530 40h26v44h20"
+              marker-end="url(#arrow-read)"
+            />
+            <path class="read" d="M530 134h26V84" />
+            <circle class="ink-muted" cx="556" cy="84" r="3" />
+            <path class="read" d="M640 104v42" marker-end="url(#arrow-read)" />
+            <path class="read" d="M700 172h56" marker-end="url(#arrow-read)" />
+
+            <path
+              class="wire dash"
+              d="M640 194v68H195V70"
+              marker-end="url(#arrow-write)"
+            />
+            <text class="dim" x="417" y="254" text-anchor="middle">
+              retrieval record
+            </text>
+
+            <path
+              class="wire dash"
+              d="M180 56h-10v141h-6"
+              marker-end="url(#arrow-write)"
+            />
+            <text class="dim" x="10" y="232">replay by retrieval_id</text>
+          </svg>
+        </div>
+
+        <div class="follow">
+          <p class="cap">
+            Solid brass is the write path, and it only ever appends. The read
+            path runs both indexes, fuses their ranks, and writes its own
+            decision back into the ledger, which is why an old retrieval can be
+            replayed instead of re-run.
+          </p>
+        </div>
       </section>
 
       <section class="record" aria-labelledby="r2">
@@ -631,6 +961,230 @@
             The CLI, an MCP server over stdio, an optional gRPC surface, and
             Python in-process. Every one of them returns the same provenance.
           </p>
+          <div class="tabs">
+            <div role="tablist" aria-label="Ways to run MemVault">
+              <button
+                type="button"
+                role="tab"
+                id="tab-cli"
+                aria-controls="panel-cli"
+                aria-selected="true"
+              >
+                CLI
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="tab-mcp"
+                aria-controls="panel-mcp"
+                aria-selected="false"
+              >
+                MCP
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="tab-grpc"
+                aria-controls="panel-grpc"
+                aria-selected="false"
+              >
+                gRPC
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="tab-python"
+                aria-controls="panel-python"
+                aria-selected="false"
+              >
+                Python
+              </button>
+            </div>
+
+            <section
+              role="tabpanel"
+              id="panel-cli"
+              aria-labelledby="tab-cli"
+              tabindex="0"
+            >
+              <h3>CLI</h3>
+              <div class="cmd">
+                <button type="button" class="copy" aria-live="polite" hidden>
+                  copy
+                </button>
+                <pre tabindex="0">
+memvault --data-dir ./my-memory write --namespace project \
+  --content "the deploy script lives in ops/deploy.sh"
+
+memvault --data-dir ./my-memory search --namespace project \
+  --query "deploy script" --max-tokens 20
+
+memvault --data-dir ./my-memory explain &lt;retrieval_id&gt;
+memvault --data-dir ./my-memory verify
+memvault --data-dir ./my-memory forget &lt;fact_id&gt; --reason "customer deletion request"</pre>
+              </div>
+              <p>
+                No server and no config. <code>search</code> prints the
+                provenance table above and a <code>retrieval_id</code>;
+                <code>explain</code> reprints that table later from the ledger,
+                and <code>verify</code> answers
+                <code>chain verified from seq 0</code>. The binary builds to
+                <code>target/release/memvault</code>; the commands above assume
+                you put it on your <code>PATH</code>.
+              </p>
+            </section>
+
+            <section
+              role="tabpanel"
+              id="panel-mcp"
+              aria-labelledby="tab-mcp"
+              tabindex="0"
+            >
+              <h3>MCP</h3>
+              <p>
+                Point the client at <code>memvault-server</code>, with a data
+                directory as its one argument. Save this as
+                <code>.mcp.json</code> in your project root for Claude Code, or
+                merge it into <code>claude_desktop_config.json</code> for Claude
+                Desktop. Any other MCP client takes the same shape: it is a
+                plain stdio server.
+              </p>
+              <div class="cmd">
+                <button type="button" class="copy" aria-live="polite" hidden>
+                  copy
+                </button>
+                <pre tabindex="0">
+{
+  "mcpServers": {
+    "memvault": {
+      "command": "/absolute/path/to/memvault/target/release/memvault-server",
+      "args": ["/absolute/path/to/my-memory"]
+    }
+  }
+}</pre>
+              </div>
+              <p class="warn">
+                Use absolute paths for both. The server inherits whatever
+                working directory the client happened to launch it from, which
+                is rarely the one you expect.
+              </p>
+              <p>Restart the client and the agent has six tools:</p>
+              <table class="spec">
+                <tbody>
+                  <tr>
+                    <th scope="row">memory_write</th>
+                    <td>
+                      Assert a fact. Pass an existing <code>fact_id</code> to
+                      supersede that fact instead; it has to be one of this
+                      namespace&rsquo;s own.
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row">memory_search</th>
+                    <td>Hybrid retrieval, with the full provenance table.</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">memory_as_of</th>
+                    <td>
+                      What was true, or what the engine believed, at a given
+                      moment.
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row">memory_supersede</th>
+                    <td>
+                      Close a fact&rsquo;s interval without asserting a
+                      replacement.
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row">memory_forget</th>
+                    <td>Cryptographic erase.</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">memory_explain</th>
+                    <td>
+                      Reconstruct any past retrieval from its
+                      <code>retrieval_id</code>.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                On startup the server runs recovery and verifies the chain,
+                logging the result to stderr. Stdout is the protocol channel and
+                carries nothing else.
+              </p>
+            </section>
+
+            <section
+              role="tabpanel"
+              id="panel-grpc"
+              aria-labelledby="tab-grpc"
+              tabindex="0"
+            >
+              <h3>gRPC</h3>
+              <div class="cmd">
+                <button type="button" class="copy" aria-live="polite" hidden>
+                  copy
+                </button>
+                <pre tabindex="0">
+cargo build -p memvault-server --features grpc
+
+MEMVAULT_GRPC_ADDR=127.0.0.1:50051 \
+  ./target/debug/memvault-server ./my-memory</pre>
+              </div>
+              <p>
+                Off by default, for multi-process deployments where stdio is not
+                available. The same six operations, as structured messages
+                instead of text; the schema is
+                <code>crates/memvault-server/proto/memvault.proto</code>. A
+                default build <em>rejects</em> <code>MEMVAULT_GRPC_ADDR</code>
+                rather than ignoring it, so a half-configured deployment fails
+                at startup instead of quietly serving the wrong thing.
+              </p>
+            </section>
+
+            <section
+              role="tabpanel"
+              id="panel-python"
+              aria-labelledby="tab-python"
+              tabindex="0"
+            >
+              <h3>Python</h3>
+              <div class="cmd">
+                <button type="button" class="copy" aria-live="polite" hidden>
+                  copy
+                </button>
+                <pre tabindex="0">
+pip install maturin
+maturin build -m crates/memvault-ffi/Cargo.toml --release
+pip install --find-links target/wheels memvault</pre>
+              </div>
+              <div class="cmd">
+                <button type="button" class="copy" aria-live="polite" hidden>
+                  copy
+                </button>
+                <pre tabindex="0">import memvault
+
+mv = memvault.MemVault("./my-memory")
+fact_id = mv.write("project", "the deploy script lives in ops/deploy.sh")
+
+retrieval_id, explanations = mv.search("project", "deploy script")
+for e in explanations:
+    print(e.fact_id, e.outcome, e.final_score, e.token_cost)
+
+mv.verify()  <span class="cm"># raises if the chain is broken</span></pre>
+              </div>
+              <p>
+                In-process, with no subprocess and no event loop. The API is
+                synchronous and every call releases the GIL while the engine
+                works. <code>Explanation</code> carries the same fields as the
+                table above, so provenance does not get thinner just because you
+                came in this way.
+              </p>
+            </section>
+          </div>
         </div>
       </section>
 
@@ -649,6 +1203,82 @@
             holds. The fact leaves search, its content hash survives, and nobody
             can recover what it said.
           </p>
+          <div class="fig">
+            <svg viewBox="0 0 460 340" role="img" aria-labelledby="d2t d2d">
+              <title id="d2t">
+                A ledger record before and after forgetting
+              </title>
+              <desc id="d2d">
+                The same ledger record, before and after a forget. The record
+                keeps its sequence number, its fact id and its content hash;
+                only the plaintext goes, because the key that decrypted it was
+                destroyed. Verify still reports the chain intact from seq 0.
+              </desc>
+
+              <text class="dim" x="10" y="18">as written</text>
+              <rect class="box" x="10" y="30" width="440" height="88" />
+              <text x="26" y="56">
+                <tspan class="ink-brass">seq 0</tspan>
+                <tspan dx="14">kind Assert</tspan>
+                <tspan dx="14">fact_id 34e2001b</tspan>
+              </text>
+              <text x="26" y="80">content_hash 76d44f5d ciphertext_len 56</text>
+              <text class="lbl" x="26" y="104">
+                the deploy script lives in ops/deploy.sh
+              </text>
+
+              <path
+                class="wire dash"
+                d="M40 124v54"
+                marker-end="url(#arrow-forget)"
+              />
+              <defs>
+                <marker
+                  id="arrow-forget"
+                  viewBox="0 0 8 8"
+                  refX="7"
+                  refY="4"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto"
+                >
+                  <path d="M0 0 8 4 0 8z" class="ink-brass" />
+                </marker>
+              </defs>
+              <text x="58" y="156">
+                forget --reason "customer deletion request"
+              </text>
+
+              <text class="dim" x="10" y="208">
+                after: the key is destroyed
+              </text>
+              <rect class="box" x="10" y="220" width="440" height="88" />
+              <text x="26" y="246">
+                <tspan class="ink-brass">seq 0</tspan>
+                <tspan dx="14">kind Assert</tspan>
+                <tspan dx="14">fact_id 34e2001b</tspan>
+              </text>
+              <text class="ink-brass" x="26" y="270">
+                content_hash 76d44f5d ciphertext_len 56
+              </text>
+              <text class="ink-clay" x="26" y="294">
+                undecryptable (key destroyed or never existed)
+              </text>
+
+              <text x="10" y="332">
+                <tspan class="dim">memvault verify</tspan>
+                <tspan class="ink-verdigris" dx="14">
+                  chain verified from seq 0
+                </tspan>
+              </text>
+            </svg>
+            <p class="cap">
+              The record does not move and the hash does not change, so the
+              history stays honest. Anyone holding the original plaintext can
+              still prove what this record said; nobody can recover it from
+              here.
+            </p>
+          </div>
         </div>
       </section>
 
@@ -667,6 +1297,70 @@
             MemVault thought held at that moment. They are not the same
             question, and a memory that conflates them cannot explain itself.
           </p>
+          <div class="fig">
+            <svg viewBox="0 0 460 300" role="img" aria-labelledby="d3t d3d">
+              <title id="d3t">Valid time against belief time</title>
+              <desc id="d3d">
+                Two axes. The horizontal one is valid time, when the fact held
+                in the world. The vertical one is belief time, from the moment
+                MemVault was told. The shaded block is one fact on both axes,
+                and a query fixes a point on each axis: asking about moment T as
+                the engine understood things at moment U.
+              </desc>
+              <defs>
+                <marker
+                  id="arrow-axis"
+                  viewBox="0 0 8 8"
+                  refX="7"
+                  refY="4"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto"
+                >
+                  <path d="M0 0 8 4 0 8z" class="ink-muted" />
+                </marker>
+              </defs>
+
+              <rect class="band" x="150" y="70" width="230" height="130" />
+              <text class="lbl" x="162" y="94">staging runs</text>
+              <text class="lbl" x="162" y="110">postgres 16</text>
+
+              <path
+                class="read"
+                d="M70 240h374"
+                marker-end="url(#arrow-axis)"
+              />
+              <path class="read" d="M70 240V36" marker-end="url(#arrow-axis)" />
+
+              <path class="read dash" d="M300 240V44" />
+              <path class="read dash" d="M70 120h374" />
+              <circle class="ink-brass" cx="300" cy="120" r="5" />
+
+              <text class="ink-brass" x="300" y="258" text-anchor="middle">
+                T
+              </text>
+              <text class="ink-brass" x="60" y="124" text-anchor="end">U</text>
+              <text class="dim" x="250" y="278" text-anchor="middle">
+                valid time: when the fact held
+              </text>
+              <text
+                class="dim"
+                x="24"
+                y="140"
+                text-anchor="middle"
+                transform="rotate(-90 24 140)"
+              >
+                belief time: when we were told
+              </text>
+              <text class="dim" x="306" y="36">as_of(valid T,</text>
+              <text class="dim" x="306" y="52">belief U)</text>
+            </svg>
+            <p class="cap">
+              Move T and you ask a different question of the world. Move U and
+              you ask the same question of an earlier MemVault. A memory that
+              collapses the two axes cannot tell you which one changed.
+            </p>
+          </div>
         </div>
       </section>
 
@@ -683,6 +1377,48 @@
           <p>
             Paste one prompt into the agent you already use and let it clone,
             build, wire up the MCP config, and prove the round trip works.
+          </p>
+          <div class="cmd">
+            <button type="button" class="copy" aria-live="polite" hidden>
+              copy
+            </button>
+            <pre tabindex="0">
+Install MemVault as an MCP server for this project.
+
+Prerequisites, check both before you start and stop if either is missing:
+Rust 1.85 or newer (the workspace is edition 2024), and a C++ toolchain,
+because the vector index builds from source.
+
+1. git clone https://github.com/swap-mitra/memvault
+   cd memvault
+   cargo build --release
+
+2. If the build fails, stop and report the error to me verbatim. Do not
+   improvise a fix, and do not substitute another memory tool.
+
+3. Write .mcp.json in my project root. Use absolute paths for both the
+   binary and the data directory, because the server inherits whatever
+   working directory the client launched it from:
+
+   {
+     "mcpServers": {
+       "memvault": {
+         "command": "&lt;abs path&gt;/target/release/memvault-server",
+         "args": ["&lt;abs path&gt;/my-memory"]
+       }
+     }
+   }
+
+4. Tell me to restart the client, then prove the round trip: call
+   memory_write with namespace "project" and some fact about this repo,
+   call memory_search for it, and report the retrieval_id and the outcome
+   column you got back.</pre>
+          </div>
+          <p class="cap">
+            It clones, builds, writes the config with absolute paths, and then
+            proves the round trip rather than declaring victory. If the build
+            fails it is told to stop and hand you the error, which is the one
+            place an agent otherwise starts inventing.
           </p>
         </div>
       </section>
@@ -746,5 +1482,56 @@
         </div>
       </section>
     </main>
+
+    <script>
+      // Progressive enhancement, both of these. Without the script every panel
+      // stays in the document and the tablist and copy buttons stay hidden,
+      // because a control that cannot work should not be on the page.
+      for (const tabs of document.querySelectorAll(".tabs")) {
+        const btns = [...tabs.querySelectorAll('[role="tab"]')];
+        const panels = [...tabs.querySelectorAll('[role="tabpanel"]')];
+        const show = (i) => {
+          btns.forEach((b, j) => {
+            b.setAttribute("aria-selected", j === i);
+            b.tabIndex = j === i ? 0 : -1;
+          });
+          panels.forEach((p, j) => (p.hidden = j !== i));
+        };
+        btns.forEach((b, i) => {
+          b.addEventListener("click", () => show(i));
+          b.addEventListener("keydown", (e) => {
+            const step = {
+              ArrowRight: 1,
+              ArrowLeft: -1,
+              Home: -i,
+              End: btns.length - 1 - i,
+            }[e.key];
+            if (step === undefined) return;
+            e.preventDefault();
+            const n = (i + step + btns.length) % btns.length;
+            show(n);
+            btns[n].focus();
+          });
+        });
+        tabs.dataset.js = "";
+        show(0);
+      }
+
+      for (const btn of document.querySelectorAll(".copy")) {
+        const flash = (t) => {
+          btn.textContent = t;
+          setTimeout(() => (btn.textContent = "copy"), 1600);
+        };
+        btn.addEventListener("click", () =>
+          navigator.clipboard
+            .writeText(btn.nextElementSibling.textContent.trim())
+            .then(
+              () => flash("copied"),
+              () => flash("copy failed"),
+            ),
+        );
+        btn.hidden = false;
+      }
+    </script>
   </body>
 </html>

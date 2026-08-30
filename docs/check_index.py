@@ -42,6 +42,48 @@ def hero_rows_match_readme(html: str) -> list:
     return []
 
 
+TOKEN = re.compile(r"--([a-z]+): (#[0-9a-f]{6})")
+MIX = re.compile(r"--([a-z]+): color-mix\(in srgb, var\(--([a-z]+)\) (\d+)%, var\(--([a-z]+)\)\)")
+
+# Every text colour the page puts on a ground, and the ground it puts it on.
+PAIRS = [
+    ("bone", "ink"), ("bone", "panel"),
+    ("muted", "ink"), ("muted", "panel"), ("muted", "raise"),
+    ("faint", "ink"), ("faint", "panel"),
+    ("brass", "ink"), ("brass", "panel"),
+    ("verdigris", "ink"), ("verdigris", "panel"),
+    ("clay", "ink"), ("clay", "panel"),
+]
+
+
+def contrast(html: str) -> list:
+    """Every text/ground pair at 4.5:1 or better. The tokens are read from
+    :root, so darkening one to taste fails here instead of in someone's eyes."""
+    root = html.split(":root {", 1)[1].split("\n      }", 1)[0]
+    colours = {
+        name: tuple(int(v[i : i + 2], 16) for i in (1, 3, 5))
+        for name, v in TOKEN.findall(root)
+    }
+    for name, a, pct, b in MIX.findall(root):
+        w = int(pct) / 100
+        colours[name] = tuple(
+            colours[a][i] * w + colours[b][i] * (1 - w) for i in range(3)
+        )
+
+    def lum(c):
+        f = [v / 255 for v in c]
+        f = [v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4 for v in f]
+        return 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2]
+
+    errors = []
+    for fg, bg in PAIRS:
+        hi, lo = sorted((lum(colours[fg]), lum(colours[bg])), reverse=True)
+        ratio = (hi + 0.05) / (lo + 0.05)
+        if ratio < 4.5:
+            errors.append(f"{fg} on {bg} is {ratio:.2f}:1, under 4.5:1")
+    return errors
+
+
 def main() -> int:
     html = PAGE.read_text(encoding="utf-8")
     records = RECORD.findall(html)
@@ -66,6 +108,7 @@ def main() -> int:
         errors.append(f"hard-coded colours below :root: {strays}")
 
     errors += hero_rows_match_readme(html)
+    errors += contrast(html)
 
     # An inline icon means the tab is drawn without a request. Swap it for a
     # file and every page load fetches one, or 404s on /favicon.ico.
