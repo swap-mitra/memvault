@@ -5,6 +5,8 @@
 **A local-first memory engine for AI agents.**
 One binary, no service to operate, no network required.
 
+**[swap-mitra.github.io/memvault](https://swap-mitra.github.io/memvault/)**
+
 [![ci](https://github.com/swap-mitra/memvault/actions/workflows/ci.yml/badge.svg)](https://github.com/swap-mitra/memvault/actions/workflows/ci.yml)
 [![wheels](https://github.com/swap-mitra/memvault/actions/workflows/wheels.yml/badge.svg)](https://github.com/swap-mitra/memvault/actions/workflows/wheels.yml)
 [![benchmarks](https://github.com/swap-mitra/memvault/actions/workflows/benchmarks.yml/badge.svg)](https://github.com/swap-mitra/memvault/actions/workflows/benchmarks.yml)
