@@ -12,9 +12,10 @@ use clap::{Parser, Subcommand};
 use uuid::Uuid;
 
 use memvault_core::{
-    default_fingerprint, erase, explain, memory_as_of, open_stores, placeholder_embedding, recover,
-    search, supersede_fact, write_fact, AsOfQuery, Explanation, Indexes, Keyring, Ledger,
-    NamespaceId, Outcome, Payload, Query, RecoveryConfig, SourceRef, WriteInput,
+    default_fingerprint, erase, explain, explanation_row, memory_as_of, open_stores, outcome_cell,
+    placeholder_embedding, recover, search, supersede_fact, write_fact, AsOfQuery, Explanation,
+    Indexes, Keyring, Ledger, NamespaceId, Outcome, Payload, Query, RecoveryConfig, SourceRef,
+    WriteInput, EXPLANATION_HEADER,
 };
 
 #[derive(Parser)]
@@ -140,27 +141,13 @@ fn outcome_sgr_code(outcome: Outcome) -> &'static str {
 
 fn print_explanations(explanations: &[Explanation]) {
     let color = color_enabled();
-    let header = format!(
-        "{:<36} {:>8} {:>10} {:>8} {:>10} {:>9} {:>9} {:>9} {:>13} {:>6}",
-        "fact_id", "ann_rank", "ann_dist", "bm25_rk", "bm25_score", "rrf", "decay_wt", "final", "outcome", "tokens"
-    );
-    println!("{}", colorize(&header, "1", color)); // bold
+    println!("{}", colorize(EXPLANATION_HEADER, "1", color)); // bold
 
     for e in explanations {
-        let outcome_padded = format!("{:>13}", format!("{:?}", e.outcome));
-        let outcome_field = colorize(&outcome_padded, outcome_sgr_code(e.outcome), color);
-        println!(
-            "{:<36} {:>8} {:>10} {:>8} {:>10} {:>9.4} {:>9.4} {:>9.4} {outcome_field} {:>6}",
-            e.fact_id,
-            e.ann_rank.map(|r| r.to_string()).unwrap_or_else(|| "-".into()),
-            e.ann_distance.map(|d| format!("{d:.4}")).unwrap_or_else(|| "-".into()),
-            e.bm25_rank.map(|r| r.to_string()).unwrap_or_else(|| "-".into()),
-            e.bm25_score.map(|s| format!("{s:.4}")).unwrap_or_else(|| "-".into()),
-            e.rrf_score,
-            e.decay_weight,
-            e.final_score,
-            e.token_cost,
-        );
+        // Colour the padded cell, never the row: the escape bytes would
+        // otherwise count toward the column width.
+        let outcome = colorize(&outcome_cell(e), outcome_sgr_code(e.outcome), color);
+        println!("{}", explanation_row(e, &outcome));
     }
 }
 

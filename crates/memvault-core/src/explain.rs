@@ -210,6 +210,33 @@ pub enum ExplainError {
     NotFound,
 }
 
+/// The provenance table's column widths, shared so the CLI can colour a
+/// cell without recomputing the alignment underneath it.
+pub const EXPLANATION_HEADER: &str = "fact_id                              ann_rank   ann_dist  bm25_rk bm25_score       rrf  decay_wt     final       outcome tokens";
+
+/// One `Explanation` as a row under [`EXPLANATION_HEADER`], with the outcome
+/// cell already padded to its column so a caller can wrap it in escape codes
+/// without disturbing the alignment. No trailing newline.
+pub fn explanation_row(e: &Explanation, outcome_cell: &str) -> String {
+    format!(
+        "{:<36} {:>8} {:>10} {:>8} {:>10} {:>9.4} {:>9.4} {:>9.4} {outcome_cell} {:>6}",
+        e.fact_id,
+        e.ann_rank.map(|r| r.to_string()).unwrap_or_else(|| "-".into()),
+        e.ann_distance.map(|d| format!("{d:.4}")).unwrap_or_else(|| "-".into()),
+        e.bm25_rank.map(|r| r.to_string()).unwrap_or_else(|| "-".into()),
+        e.bm25_score.map(|s| format!("{s:.4}")).unwrap_or_else(|| "-".into()),
+        e.rrf_score,
+        e.decay_weight,
+        e.final_score,
+        e.token_cost,
+    )
+}
+
+/// The outcome cell padded to its column width, uncoloured.
+pub fn outcome_cell(e: &Explanation) -> String {
+    format!("{:>13}", format!("{:?}", e.outcome))
+}
+
 /// Reconstructs a past retrieval exactly from its `Retrieval` ledger
 /// record. A linear scan: fine at the ledger sizes this project targets,
 /// and there's no retrieval_id index yet to do better with.

@@ -75,7 +75,7 @@ pub use crypto::{content_hash, DecryptError, Keyring, KeyringError};
 pub use decay::{apply_decay, decay_weight, DecayConfig, ScoredCandidate};
 pub use embedding::{placeholder_embedding, PLACEHOLDER_EMBEDDING_NAME};
 pub use erase::{erase, EraseError};
-pub use explain::{explain, search, ExplainError};
+pub use explain::{explain, explanation_row, outcome_cell, search, ExplainError, EXPLANATION_HEADER};
 pub use index::{IndexError, Indexes, KeywordIndex, VectorIndex};
 pub use ledger::{Ledger, LedgerError, VerifyError, WriteAssertOutcome, WriteEraseOutcome, WriteSupersedeOutcome};
 pub use read_path::{hybrid_search, FusedCandidate, Query, SearchError};
