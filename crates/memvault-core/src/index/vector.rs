@@ -3,11 +3,10 @@
 //! keys are `u64`, ours are `Uuid`), the watermark, and the model
 //! fingerprint.
 //!
-//! The risk spike (see docs/IMPLEMENTATION_PLAN.md, and
-//! examples/hnsw_supersede_spike.rs) found tombstone accumulation from
-//! repeated supersession is not a first-order concern at moderate churn;
-//! `remove` does not schedule periodic `compact()` here, since nothing yet
-//! calls `remove` at volume to need it.
+//! The risk spike (see docs/IMPLEMENTATION_PLAN.md) found tombstone
+//! accumulation from repeated supersession is not a first-order concern at
+//! moderate churn; `remove` does not schedule periodic `compact()` here,
+//! since nothing yet calls `remove` at volume to need it.
 
 use std::path::{Path, PathBuf};
 
