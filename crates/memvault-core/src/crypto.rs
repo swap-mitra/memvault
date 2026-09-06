@@ -17,60 +17,28 @@ use crate::record::Encrypted;
 
 const KEYS_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("keys");
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum KeyringError {
+    #[error("keyring storage error: {0}")]
     Redb(redb::Error),
 }
 
-impl std::fmt::Display for KeyringError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            KeyringError::Redb(e) => write!(f, "keyring storage error: {e}"),
-        }
-    }
-}
+crate::redb_error!(KeyringError, KeyringError::Redb);
 
-impl std::error::Error for KeyringError {}
-
-macro_rules! redb_error {
-    ($t:ty) => {
-        impl From<$t> for KeyringError {
-            fn from(e: $t) -> Self {
-                KeyringError::Redb(e.into())
-            }
-        }
-    };
-}
-
-redb_error!(redb::DatabaseError);
-redb_error!(redb::TransactionError);
-redb_error!(redb::TableError);
-redb_error!(redb::StorageError);
-redb_error!(redb::CommitError);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DecryptError {
     /// No key on file for this fact_id: either it was erased (product doc
     /// §6.5) or never existed. The ciphertext alone can't distinguish
     /// those, and callers don't need it to -- either way it can't be read.
+    #[error("key destroyed or never existed")]
     KeyDestroyed,
     /// AEAD authentication failed: wrong key, corrupted ciphertext, or a
     /// tampered nonce.
+    #[error("ciphertext failed authentication")]
     InvalidCiphertext,
+    #[error("keyring storage error: {0}")]
     Storage(String),
 }
-
-impl std::fmt::Display for DecryptError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DecryptError::KeyDestroyed => write!(f, "key destroyed or never existed"),
-            DecryptError::InvalidCiphertext => write!(f, "ciphertext failed authentication"),
-            DecryptError::Storage(e) => write!(f, "keyring storage error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for DecryptError {}
 
 pub struct Keyring {
     db: redb::Database,

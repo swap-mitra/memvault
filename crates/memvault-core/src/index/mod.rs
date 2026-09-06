@@ -22,42 +22,21 @@ pub struct Indexes {
     pub keyword: KeywordIndex,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum IndexError {
-    Usearch(cxx::Exception),
+    #[error("usearch error: {0}")]
+    Usearch(#[from] cxx::Exception),
+    #[error("index sidecar storage error: {0}")]
     Redb(redb::Error),
-    Io(std::io::Error),
+    #[error("index sidecar io error: {0}")]
+    Io(#[from] std::io::Error),
     /// tantivy::TantivyError and tantivy::query::QueryParserError, flattened
     /// to a message: both are tantivy-originated and neither needs to be
     /// matched on by callers here, just reported.
+    #[error("tantivy error: {0}")]
     Tantivy(String),
+    #[error("index sidecar corrupt: {0}")]
     Corrupt(String),
-}
-
-impl std::fmt::Display for IndexError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            IndexError::Usearch(e) => write!(f, "usearch error: {e}"),
-            IndexError::Redb(e) => write!(f, "index sidecar storage error: {e}"),
-            IndexError::Io(e) => write!(f, "index sidecar io error: {e}"),
-            IndexError::Tantivy(e) => write!(f, "tantivy error: {e}"),
-            IndexError::Corrupt(msg) => write!(f, "index sidecar corrupt: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for IndexError {}
-
-impl From<cxx::Exception> for IndexError {
-    fn from(e: cxx::Exception) -> Self {
-        IndexError::Usearch(e)
-    }
-}
-
-impl From<std::io::Error> for IndexError {
-    fn from(e: std::io::Error) -> Self {
-        IndexError::Io(e)
-    }
 }
 
 impl From<tantivy::TantivyError> for IndexError {
@@ -78,18 +57,4 @@ impl From<tantivy::directory::error::OpenDirectoryError> for IndexError {
     }
 }
 
-macro_rules! redb_error {
-    ($t:ty) => {
-        impl From<$t> for IndexError {
-            fn from(e: $t) -> Self {
-                IndexError::Redb(e.into())
-            }
-        }
-    };
-}
-
-redb_error!(redb::DatabaseError);
-redb_error!(redb::TransactionError);
-redb_error!(redb::TableError);
-redb_error!(redb::StorageError);
-redb_error!(redb::CommitError);
+crate::redb_error!(IndexError, IndexError::Redb);

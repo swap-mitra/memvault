@@ -429,28 +429,19 @@ pub fn canonical_bytes(record: &Record) -> Vec<u8> {
 
 // --- canonical decoding -------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum DecodeError {
+    #[error("record bytes truncated")]
     UnexpectedEof,
+    #[error("invalid discriminant byte: {0}")]
     InvalidDiscriminant(u8),
+    #[error("invalid utf-8 in record bytes")]
     InvalidUtf8,
+    #[error("timestamp out of range")]
     InvalidTimestamp,
+    #[error("unconsumed bytes after decoding record")]
     TrailingBytes,
 }
-
-impl std::fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DecodeError::UnexpectedEof => write!(f, "record bytes truncated"),
-            DecodeError::InvalidDiscriminant(v) => write!(f, "invalid discriminant byte: {v}"),
-            DecodeError::InvalidUtf8 => write!(f, "invalid utf-8 in record bytes"),
-            DecodeError::InvalidTimestamp => write!(f, "timestamp out of range"),
-            DecodeError::TrailingBytes => write!(f, "unconsumed bytes after decoding record"),
-        }
-    }
-}
-
-impl std::error::Error for DecodeError {}
 
 struct Decoder<'a> {
     bytes: &'a [u8],

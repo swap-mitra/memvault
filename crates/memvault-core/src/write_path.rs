@@ -46,49 +46,20 @@ pub struct WriteInput {
     pub source: SourceRef,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum WriteError {
+    #[error("valid_to must be after valid_from")]
     InvalidInterval,
+    #[error("content is {actual} bytes, over the {max}-byte limit")]
     ContentTooLarge { max: usize, actual: usize },
+    #[error("embedding has {actual} dimensions, model expects {expected}")]
     EmbeddingDimensionMismatch { expected: u32, actual: usize },
-    Ledger(LedgerError),
-    Keyring(KeyringError),
-    Index(IndexError),
-}
-
-impl std::fmt::Display for WriteError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            WriteError::InvalidInterval => write!(f, "valid_to must be after valid_from"),
-            WriteError::ContentTooLarge { max, actual } => {
-                write!(f, "content is {actual} bytes, over the {max}-byte limit")
-            }
-            WriteError::EmbeddingDimensionMismatch { expected, actual } => {
-                write!(f, "embedding has {actual} dimensions, model expects {expected}")
-            }
-            WriteError::Ledger(e) => write!(f, "{e}"),
-            WriteError::Keyring(e) => write!(f, "{e}"),
-            WriteError::Index(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for WriteError {}
-
-impl From<LedgerError> for WriteError {
-    fn from(e: LedgerError) -> Self {
-        WriteError::Ledger(e)
-    }
-}
-impl From<KeyringError> for WriteError {
-    fn from(e: KeyringError) -> Self {
-        WriteError::Keyring(e)
-    }
-}
-impl From<IndexError> for WriteError {
-    fn from(e: IndexError) -> Self {
-        WriteError::Index(e)
-    }
+    #[error(transparent)]
+    Ledger(#[from] LedgerError),
+    #[error(transparent)]
+    Keyring(#[from] KeyringError),
+    #[error(transparent)]
+    Index(#[from] IndexError),
 }
 
 fn validate(input: &WriteInput) -> Result<(), WriteError> {
@@ -161,35 +132,15 @@ pub fn write_fact(ledger: &Ledger, indexes: &mut Indexes, keyring: &mut Keyring,
     Ok(fact_id)
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SupersedeError {
     /// `fact_id` has no currently-open Assert -- nothing to close.
+    #[error("no open fact with that id")]
     NotFound,
-    Ledger(LedgerError),
-    Index(IndexError),
-}
-
-impl std::fmt::Display for SupersedeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SupersedeError::NotFound => write!(f, "no open fact with that id"),
-            SupersedeError::Ledger(e) => write!(f, "{e}"),
-            SupersedeError::Index(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for SupersedeError {}
-
-impl From<LedgerError> for SupersedeError {
-    fn from(e: LedgerError) -> Self {
-        SupersedeError::Ledger(e)
-    }
-}
-impl From<IndexError> for SupersedeError {
-    fn from(e: IndexError) -> Self {
-        SupersedeError::Index(e)
-    }
+    #[error(transparent)]
+    Ledger(#[from] LedgerError),
+    #[error(transparent)]
+    Index(#[from] IndexError),
 }
 
 /// Closes `fact_id`'s open interval without asserting a replacement --

@@ -11,7 +11,7 @@ use crate::crypto::{Keyring, KeyringError};
 use crate::index::{IndexError, Indexes};
 use crate::ledger::{Ledger, LedgerError};
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum EraseError {
     /// `fact_id` has no currently-open Assert -- nothing to erase.
     /// ponytail: mirrors `supersede_fact`'s scope -- an already-closed
@@ -19,39 +19,14 @@ pub enum EraseError {
     /// erased this way yet. Nothing in the plan's exit tests needs that;
     /// upgrade path is keying off the keyring entry's presence instead of
     /// `open_facts` if closed-fact erasure is needed later.
+    #[error("no open fact with that id")]
     NotFound,
-    Ledger(LedgerError),
-    Keyring(KeyringError),
-    Index(IndexError),
-}
-
-impl std::fmt::Display for EraseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EraseError::NotFound => write!(f, "no open fact with that id"),
-            EraseError::Ledger(e) => write!(f, "{e}"),
-            EraseError::Keyring(e) => write!(f, "{e}"),
-            EraseError::Index(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for EraseError {}
-
-impl From<LedgerError> for EraseError {
-    fn from(e: LedgerError) -> Self {
-        EraseError::Ledger(e)
-    }
-}
-impl From<KeyringError> for EraseError {
-    fn from(e: KeyringError) -> Self {
-        EraseError::Keyring(e)
-    }
-}
-impl From<IndexError> for EraseError {
-    fn from(e: IndexError) -> Self {
-        EraseError::Index(e)
-    }
+    #[error(transparent)]
+    Ledger(#[from] LedgerError),
+    #[error(transparent)]
+    Keyring(#[from] KeyringError),
+    #[error(transparent)]
+    Index(#[from] IndexError),
 }
 
 /// Erases `fact_id`. Its whole supersession lineage shares one key (see

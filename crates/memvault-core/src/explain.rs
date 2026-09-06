@@ -24,39 +24,14 @@ use crate::record::{Explanation, NamespaceId, Outcome, Payload, Retrieval};
 const DEFAULT_HALF_LIFE_DAYS: f64 = 30.0;
 const DEFAULT_DECAY_FLOOR: f64 = 0.15;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SearchError {
-    Hybrid(HybridSearchError),
-    Ledger(LedgerError),
-    Index(IndexError),
-}
-
-impl std::fmt::Display for SearchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SearchError::Hybrid(e) => write!(f, "{e}"),
-            SearchError::Ledger(e) => write!(f, "{e}"),
-            SearchError::Index(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for SearchError {}
-
-impl From<HybridSearchError> for SearchError {
-    fn from(e: HybridSearchError) -> Self {
-        SearchError::Hybrid(e)
-    }
-}
-impl From<LedgerError> for SearchError {
-    fn from(e: LedgerError) -> Self {
-        SearchError::Ledger(e)
-    }
-}
-impl From<IndexError> for SearchError {
-    fn from(e: IndexError) -> Self {
-        SearchError::Index(e)
-    }
+    #[error(transparent)]
+    Hybrid(#[from] HybridSearchError),
+    #[error(transparent)]
+    Ledger(#[from] LedgerError),
+    #[error(transparent)]
+    Index(#[from] IndexError),
 }
 
 struct Resolved {
@@ -227,22 +202,13 @@ pub fn search(ledger: &Ledger, indexes: &Indexes, query: Query) -> Result<(Vec<E
     Ok((explanations, retrieval_id))
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ExplainError {
+    #[error(transparent)]
     Ledger(LedgerError),
+    #[error("no retrieval with that id in the ledger")]
     NotFound,
 }
-
-impl std::fmt::Display for ExplainError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ExplainError::Ledger(e) => write!(f, "{e}"),
-            ExplainError::NotFound => write!(f, "no retrieval with that id in the ledger"),
-        }
-    }
-}
-
-impl std::error::Error for ExplainError {}
 
 /// Reconstructs a past retrieval exactly from its `Retrieval` ledger
 /// record. A linear scan: fine at the ledger sizes this project targets,

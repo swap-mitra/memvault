@@ -45,27 +45,12 @@ pub struct AsOfFact {
     pub pinned: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum AsOfError {
-    Ledger(LedgerError),
+    #[error(transparent)]
+    Ledger(#[from] LedgerError),
+    #[error(transparent)]
     Decrypt(DecryptError),
-}
-
-impl std::fmt::Display for AsOfError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AsOfError::Ledger(e) => write!(f, "{e}"),
-            AsOfError::Decrypt(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for AsOfError {}
-
-impl From<LedgerError> for AsOfError {
-    fn from(e: LedgerError) -> Self {
-        AsOfError::Ledger(e)
-    }
 }
 
 /// Reconstructs the facts true at `query`'s bitemporal coordinates by

@@ -12,31 +12,18 @@ pub fn record_hash(record: &Record) -> [u8; 32] {
     blake3::hash(&canonical_bytes(record)).into()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ChainError {
     /// `records[i].header.prev_hash` doesn't equal the recomputed hash of
     /// the record at `seq` — i.e. `seq` is the record whose stored bytes
     /// no longer match what its successor committed to when the chain was
     /// built. `seq` is what changed, not the record that noticed.
+    #[error("chain diverged: record at seq {seq} does not match what its successor committed to")]
     Diverged { seq: u64 },
     /// Records did not arrive as a gapless `0, 1, 2, ...` sequence.
+    #[error("non-sequential ledger: expected seq {expected}, found {found}")]
     NonSequential { expected: u64, found: u64 },
 }
-
-impl std::fmt::Display for ChainError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ChainError::Diverged { seq } => {
-                write!(f, "chain diverged: record at seq {seq} does not match what its successor committed to")
-            }
-            ChainError::NonSequential { expected, found } => {
-                write!(f, "non-sequential ledger: expected seq {expected}, found {found}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for ChainError {}
 
 /// Walks records in `seq` order from `start_seq` and verifies the chain.
 /// Cost is linear in ledger size (product doc §6.2). An empty ledger is

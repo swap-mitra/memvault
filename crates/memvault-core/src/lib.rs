@@ -1,3 +1,27 @@
+/// redb splits failure into five concrete error types that all mean one
+/// thing to us. thiserror's `#[from]` maps a single source type per variant,
+/// so this fans all five into whichever enum's `Redb` variant is named.
+macro_rules! redb_error {
+    ($enum:ty, $variant:path) => {
+        impl From<redb::DatabaseError> for $enum {
+            fn from(e: redb::DatabaseError) -> Self { $variant(e.into()) }
+        }
+        impl From<redb::TransactionError> for $enum {
+            fn from(e: redb::TransactionError) -> Self { $variant(e.into()) }
+        }
+        impl From<redb::TableError> for $enum {
+            fn from(e: redb::TableError) -> Self { $variant(e.into()) }
+        }
+        impl From<redb::StorageError> for $enum {
+            fn from(e: redb::StorageError) -> Self { $variant(e.into()) }
+        }
+        impl From<redb::CommitError> for $enum {
+            fn from(e: redb::CommitError) -> Self { $variant(e.into()) }
+        }
+    };
+}
+pub(crate) use redb_error;
+
 pub mod bitemporal;
 pub mod budget;
 pub mod chain;
