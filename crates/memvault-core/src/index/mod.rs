@@ -60,6 +60,24 @@ impl From<std::io::Error> for IndexError {
     }
 }
 
+impl From<tantivy::TantivyError> for IndexError {
+    fn from(e: tantivy::TantivyError) -> Self {
+        IndexError::Tantivy(e.to_string())
+    }
+}
+
+impl From<tantivy::query::QueryParserError> for IndexError {
+    fn from(e: tantivy::query::QueryParserError) -> Self {
+        IndexError::Tantivy(e.to_string())
+    }
+}
+
+impl From<tantivy::directory::error::OpenDirectoryError> for IndexError {
+    fn from(e: tantivy::directory::error::OpenDirectoryError) -> Self {
+        IndexError::Tantivy(e.to_string())
+    }
+}
+
 macro_rules! redb_error {
     ($t:ty) => {
         impl From<$t> for IndexError {
