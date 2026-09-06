@@ -2,10 +2,8 @@
 //! reconstructs a retrieval from three weeks earlier including every
 //! rejected candidate, and an erasure leaves the chain verifying.
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use chrono::{Duration, Utc};
+use tempfile::TempDir;
 use uuid::Uuid;
 
 use memvault_core::{
@@ -17,29 +15,22 @@ fn fingerprint() -> ModelFingerprint {
     ModelFingerprint { name: "test-model".into(), dimensions: 4, revision_hash: [3u8; 32] }
 }
 
+/// `dir` is last to drop, so every store closes before it is removed.
 struct Harness {
-    dir: PathBuf,
     ledger: Ledger,
     keyring: Keyring,
     indexes: Indexes,
+    #[allow(dead_code)]
+    dir: TempDir,
 }
 
-impl Drop for Harness {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
-}
-
-fn harness(tag: &str) -> Harness {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("memvault-phase1-exit-{tag}-{}-{n}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let ledger = Ledger::open(&dir.join("ledger.redb")).unwrap();
-    let keyring = Keyring::open(&dir.join("keys.redb")).unwrap();
-    let vector = VectorIndex::open_or_create(&dir.join("vectors.usearch"), &fingerprint()).unwrap();
-    let keyword = KeywordIndex::open_or_create(&dir.join("keyword")).unwrap();
-    Harness { dir, ledger, keyring, indexes: Indexes { vector, keyword } }
+fn harness() -> Harness {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let ledger = Ledger::open(&dir.path().join("ledger.redb")).unwrap();
+    let keyring = Keyring::open(&dir.path().join("keys.redb")).unwrap();
+    let vector = VectorIndex::open_or_create(&dir.path().join("vectors.usearch"), &fingerprint()).unwrap();
+    let keyword = KeywordIndex::open_or_create(&dir.path().join("keyword")).unwrap();
+    Harness { ledger, keyring, indexes: Indexes { vector, keyword }, dir }
 }
 
 fn write(h: &mut Harness, content: &str, embedding: Vec<f32>, valid_from: chrono::DateTime<Utc>, valid_to: Option<chrono::DateTime<Utc>>) -> Uuid {
@@ -65,7 +56,7 @@ fn write(h: &mut Harness, content: &str, embedding: Vec<f32>, valid_from: chrono
 
 #[test]
 fn test_exit_explain_and_erase() {
-    let mut h = harness("main");
+    let mut h = harness();
     let three_weeks_ago = Utc::now() - Duration::weeks(3);
 
     // Same proven shape as explain_tests::test_explanation_includes_all_outcomes,

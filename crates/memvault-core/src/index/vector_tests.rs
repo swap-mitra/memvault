@@ -1,27 +1,8 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use uuid::Uuid;
 
 use crate::index::VectorIndex;
 use crate::record::ModelFingerprint;
-
-static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn temp_index_path(tag: &str) -> PathBuf {
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("memvault-vector-test-{tag}-{}-{n}.usearch", std::process::id()))
-}
-
-struct TempPath(PathBuf);
-impl Drop for TempPath {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-        let mut meta = self.0.as_os_str().to_owned();
-        meta.push(".meta.redb");
-        let _ = std::fs::remove_file(PathBuf::from(meta));
-    }
-}
+use crate::test_support::tmp;
 
 fn fingerprint() -> ModelFingerprint {
     ModelFingerprint {
@@ -45,14 +26,15 @@ fn vector_for(seed: u64) -> Vec<f32> {
 
 #[test]
 fn open_or_create_then_reopen_preserves_fingerprint_and_watermark() {
-    let path = TempPath(temp_index_path("reopen"));
+    let dir = tmp();
+    let path = dir.path().join("vectors.usearch");
     {
-        let mut index = VectorIndex::open_or_create(&path.0, &fingerprint()).unwrap();
+        let mut index = VectorIndex::open_or_create(&path, &fingerprint()).unwrap();
         index.set_watermark(7).unwrap();
         index.insert(Uuid::from_u128(1), &vector_for(1)).unwrap();
     }
 
-    let index = VectorIndex::open_or_create(&path.0, &fingerprint()).unwrap();
+    let index = VectorIndex::open_or_create(&path, &fingerprint()).unwrap();
     assert_eq!(index.watermark(), 7);
     assert_eq!(index.fingerprint().name, "test-model");
     assert_eq!(index.fingerprint().dimensions, 8);
@@ -63,8 +45,9 @@ fn open_or_create_then_reopen_preserves_fingerprint_and_watermark() {
 /// absent from results.
 #[test]
 fn test_insert_remove_search_roundtrip() {
-    let path = TempPath(temp_index_path("roundtrip"));
-    let mut index = VectorIndex::open_or_create(&path.0, &fingerprint()).unwrap();
+    let dir = tmp();
+    let path = dir.path().join("vectors.usearch");
+    let mut index = VectorIndex::open_or_create(&path, &fingerprint()).unwrap();
 
     let ids: Vec<Uuid> = (0..100).map(|i| Uuid::from_u128(i as u128)).collect();
     for (i, id) in ids.iter().enumerate() {
@@ -92,8 +75,9 @@ fn test_insert_remove_search_roundtrip() {
 
 #[test]
 fn reset_discards_everything_and_accepts_a_new_dimensionality() {
-    let path = TempPath(temp_index_path("reset"));
-    let mut index = VectorIndex::open_or_create(&path.0, &fingerprint()).unwrap();
+    let dir = tmp();
+    let path = dir.path().join("vectors.usearch");
+    let mut index = VectorIndex::open_or_create(&path, &fingerprint()).unwrap();
     index.insert(Uuid::from_u128(1), &vector_for(1)).unwrap();
     index.set_watermark(9).unwrap();
 
@@ -119,8 +103,9 @@ fn reset_discards_everything_and_accepts_a_new_dimensionality() {
 /// reopened, which is what a bulk load (the benchmark corpus) hits first.
 #[test]
 fn inserts_past_the_reserved_headroom_keep_working() {
-    let path = TempPath(temp_index_path("grow"));
-    let mut index = VectorIndex::open_or_create(&path.0, &fingerprint()).unwrap();
+    let dir = tmp();
+    let path = dir.path().join("vectors.usearch");
+    let mut index = VectorIndex::open_or_create(&path, &fingerprint()).unwrap();
     for i in 0..1100u64 {
         index.insert(Uuid::from_u128(i as u128 + 1), &vector_for(i)).unwrap();
     }

@@ -10,14 +10,6 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
-
-static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn temp_data_dir(tag: &str) -> std::path::PathBuf {
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("memvault-server-kill9-test-{tag}-{}-{n}", std::process::id()))
-}
 
 struct ServerProcess {
     child: Child,
@@ -110,7 +102,8 @@ impl ServerProcess {
 
 #[test]
 fn test_exit_kill9_mid_write_recovers() {
-    let data_dir = temp_data_dir("main");
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = tmp.path();
 
     let mut server = ServerProcess::spawn(&data_dir);
 

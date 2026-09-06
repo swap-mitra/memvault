@@ -1,33 +1,14 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use uuid::Uuid;
 
 use crate::index::KeywordIndex;
-
-static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn temp_index_dir(tag: &str) -> PathBuf {
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("memvault-keyword-test-{tag}-{}-{n}", std::process::id()))
-}
-
-struct TempDir(PathBuf);
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-        let mut wm = self.0.as_os_str().to_owned();
-        wm.push(".watermark");
-        let _ = std::fs::remove_file(PathBuf::from(wm));
-    }
-}
+use crate::test_support::tmp;
 
 /// The plan's acceptance test: index 3 short docs, one clearly on-topic,
 /// assert it ranks first for a matching query.
 #[test]
 fn test_bm25_ranks_relevant_above_irrelevant() {
-    let dir = TempDir(temp_index_dir("bm25"));
-    let mut index = KeywordIndex::open_or_create(&dir.0).unwrap();
+    let dir = tmp();
+    let mut index = KeywordIndex::open_or_create(dir.path()).unwrap();
 
     let on_topic = Uuid::from_u128(1);
     let off_topic_a = Uuid::from_u128(2);
@@ -45,8 +26,8 @@ fn test_bm25_ranks_relevant_above_irrelevant() {
 
 #[test]
 fn keywords_boost_ranking() {
-    let dir = TempDir(temp_index_dir("boost"));
-    let mut index = KeywordIndex::open_or_create(&dir.0).unwrap();
+    let dir = tmp();
+    let mut index = KeywordIndex::open_or_create(dir.path()).unwrap();
 
     let boosted = Uuid::from_u128(1);
     let plain = Uuid::from_u128(2);
@@ -61,8 +42,8 @@ fn keywords_boost_ranking() {
 
 #[test]
 fn remove_then_commit_excludes_from_search() {
-    let dir = TempDir(temp_index_dir("remove"));
-    let mut index = KeywordIndex::open_or_create(&dir.0).unwrap();
+    let dir = tmp();
+    let mut index = KeywordIndex::open_or_create(dir.path()).unwrap();
 
     let fact_id = Uuid::from_u128(1);
     index.insert(fact_id, "a fact about removal semantics", &[]).unwrap();
@@ -78,19 +59,19 @@ fn remove_then_commit_excludes_from_search() {
 
 #[test]
 fn watermark_persists_across_reopen() {
-    let dir = TempDir(temp_index_dir("watermark"));
+    let dir = tmp();
     {
-        let mut index = KeywordIndex::open_or_create(&dir.0).unwrap();
+        let mut index = KeywordIndex::open_or_create(dir.path()).unwrap();
         index.set_watermark(42).unwrap();
     }
-    let index = KeywordIndex::open_or_create(&dir.0).unwrap();
+    let index = KeywordIndex::open_or_create(dir.path()).unwrap();
     assert_eq!(index.watermark(), 42);
 }
 
 #[test]
 fn reset_discards_everything() {
-    let dir = TempDir(temp_index_dir("reset"));
-    let mut index = KeywordIndex::open_or_create(&dir.0).unwrap();
+    let dir = tmp();
+    let mut index = KeywordIndex::open_or_create(dir.path()).unwrap();
     let fact_id = Uuid::from_u128(1);
     index.insert(fact_id, "content to be discarded", &[]).unwrap();
     index.commit().unwrap();

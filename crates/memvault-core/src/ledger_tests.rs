@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 
@@ -7,35 +5,9 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::ledger::Ledger;
-use crate::record::{Assert, Encrypted, ModelFingerprint, NamespaceId, Payload, SourceRef};
+use crate::record::{Assert, Encrypted, NamespaceId, Payload, SourceRef};
+use crate::test_support::{fingerprint, tmp};
 
-static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// A fresh path per test/call, in the OS temp dir -- no `tempfile` dependency
-/// needed for something this small.
-fn temp_ledger_path(tag: &str) -> PathBuf {
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "memvault-ledger-test-{tag}-{}-{n}.redb",
-        std::process::id()
-    ))
-}
-
-struct TempPath(PathBuf);
-
-impl Drop for TempPath {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
-}
-
-fn fingerprint() -> ModelFingerprint {
-    ModelFingerprint {
-        name: "test-model".into(),
-        dimensions: 4,
-        revision_hash: [1u8; 32],
-    }
-}
 
 fn assert_value(fact_id: Uuid, tag: u64) -> Assert {
     Assert {
@@ -61,8 +33,9 @@ fn assert_payload(tag: u64) -> Payload {
 
 #[test]
 fn append_read_round_trips() {
-    let path = TempPath(temp_ledger_path("roundtrip"));
-    let ledger = Ledger::open(&path.0).unwrap();
+    let dir = tmp();
+    let path = dir.path().join("ledger.redb");
+    let ledger = Ledger::open(&path).unwrap();
 
     let seq = ledger
         .append(NamespaceId("default".into()), Utc::now(), assert_payload(42))
@@ -81,8 +54,9 @@ fn append_read_round_trips() {
 
 #[test]
 fn append_extends_and_verifies_chain() {
-    let path = TempPath(temp_ledger_path("chain"));
-    let ledger = Ledger::open(&path.0).unwrap();
+    let dir = tmp();
+    let path = dir.path().join("ledger.redb");
+    let ledger = Ledger::open(&path).unwrap();
 
     for i in 0..50u64 {
         let seq = ledger
@@ -103,8 +77,9 @@ fn append_extends_and_verifies_chain() {
 fn test_concurrent_read_during_write() {
     const N: u64 = 1000;
 
-    let path = TempPath(temp_ledger_path("concurrent"));
-    let ledger = Arc::new(Ledger::open(&path.0).unwrap());
+    let dir = tmp();
+    let path = dir.path().join("ledger.redb");
+    let ledger = Arc::new(Ledger::open(&path).unwrap());
 
     let writer = {
         let ledger = Arc::clone(&ledger);
@@ -147,8 +122,9 @@ fn test_concurrent_read_during_write() {
 
 #[test]
 fn write_assert_first_write_has_no_supersession() {
-    let path = TempPath(temp_ledger_path("write-assert-first"));
-    let ledger = Ledger::open(&path.0).unwrap();
+    let dir = tmp();
+    let path = dir.path().join("ledger.redb");
+    let ledger = Ledger::open(&path).unwrap();
     let fact_id = Uuid::from_u128(1);
 
     let outcome = ledger
@@ -161,8 +137,9 @@ fn write_assert_first_write_has_no_supersession() {
 
 #[test]
 fn write_assert_with_same_fact_id_supersedes() {
-    let path = TempPath(temp_ledger_path("write-assert-supersede"));
-    let ledger = Ledger::open(&path.0).unwrap();
+    let dir = tmp();
+    let path = dir.path().join("ledger.redb");
+    let ledger = Ledger::open(&path).unwrap();
     let fact_id = Uuid::from_u128(1);
 
     let first = ledger
@@ -192,10 +169,11 @@ fn write_assert_with_same_fact_id_supersedes() {
 
 #[test]
 fn open_facts_cache_survives_reopen() {
-    let path = TempPath(temp_ledger_path("write-assert-reopen"));
+    let dir = tmp();
+    let path = dir.path().join("ledger.redb");
     let fact_id = Uuid::from_u128(1);
     {
-        let ledger = Ledger::open(&path.0).unwrap();
+        let ledger = Ledger::open(&path).unwrap();
         ledger
             .write_assert(NamespaceId("default".into()), Utc::now(), assert_value(fact_id, 1))
             .unwrap();
@@ -206,6 +184,6 @@ fn open_facts_cache_survives_reopen() {
 
     // Reopening replays the ledger to rebuild open_facts from scratch.
     // Records: seq 0 = first Assert, seq 1 = Supersede, seq 2 = second Assert.
-    let ledger = Ledger::open(&path.0).unwrap();
+    let ledger = Ledger::open(&path).unwrap();
     assert_eq!(ledger.open_assert_seq(fact_id), Some(2));
 }

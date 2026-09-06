@@ -38,6 +38,9 @@ pub mod recovery;
 pub mod write_path;
 
 #[cfg(test)]
+mod test_support;
+
+#[cfg(test)]
 mod chain_tests;
 #[cfg(test)]
 mod explain_tests;

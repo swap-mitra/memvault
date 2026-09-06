@@ -1200,6 +1200,7 @@ dependencies = [
  "clap",
  "memvault-core",
  "redb",
+ "tempfile",
  "uuid",
 ]
 
@@ -1213,6 +1214,8 @@ dependencies = [
  "cxx",
  "redb",
  "tantivy",
+ "tempfile",
+ "thiserror",
  "usearch",
  "uuid",
 ]
@@ -1239,6 +1242,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tonic",

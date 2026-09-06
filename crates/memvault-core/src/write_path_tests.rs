@@ -1,49 +1,12 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use uuid::Uuid;
 
-use crate::crypto::Keyring;
-use crate::index::{Indexes, KeywordIndex, VectorIndex};
-use crate::ledger::{Ledger, LedgerError};
-use crate::record::{ModelFingerprint, NamespaceId, Payload, SourceRef};
+use crate::ledger::LedgerError;
+use crate::record::{NamespaceId, Payload, SourceRef};
+use crate::test_support::{fingerprint, harness};
 use crate::write_path::{supersede_fact, write_fact, SupersedeError, WriteError, WriteInput};
 
-static COUNTER: AtomicU64 = AtomicU64::new(0);
 
-fn fingerprint() -> ModelFingerprint {
-    ModelFingerprint {
-        name: "test-model".into(),
-        dimensions: 4,
-        revision_hash: [1u8; 32],
-    }
-}
-
-struct Harness {
-    dir: PathBuf,
-    ledger: Ledger,
-    keyring: Keyring,
-    indexes: Indexes,
-}
-
-impl Drop for Harness {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
-}
-
-fn harness(tag: &str) -> Harness {
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("memvault-write-path-test-{tag}-{}-{n}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-
-    let ledger = Ledger::open(&dir.join("ledger.redb")).unwrap();
-    let keyring = Keyring::open(&dir.join("keys.redb")).unwrap();
-    let vector = VectorIndex::open_or_create(&dir.join("vectors.usearch"), &fingerprint()).unwrap();
-    let keyword = KeywordIndex::open_or_create(&dir.join("keyword")).unwrap();
-
-    Harness { dir, ledger, keyring, indexes: Indexes { vector, keyword } }
-}
 
 fn input(namespace: &str, content: &str, fact_id: Option<Uuid>) -> WriteInput {
     WriteInput {
@@ -62,7 +25,7 @@ fn input(namespace: &str, content: &str, fact_id: Option<Uuid>) -> WriteInput {
 
 #[test]
 fn write_fact_round_trips_through_ledger() {
-    let mut h = harness("roundtrip");
+    let mut h = harness();
     let fact_id = write_fact(&h.ledger, &mut h.indexes, &mut h.keyring, input("default", "hello", None)).unwrap();
 
     let record = h.ledger.read(0).unwrap().unwrap();
@@ -78,7 +41,7 @@ fn write_fact_round_trips_through_ledger() {
 
 #[test]
 fn rejects_oversized_content() {
-    let mut h = harness("oversized");
+    let mut h = harness();
     let mut too_big = input("default", "x", None);
     too_big.content = vec![0u8; crate::write_path::DEFAULT_MAX_CONTENT_BYTES + 1];
 
@@ -89,7 +52,7 @@ fn rejects_oversized_content() {
 
 #[test]
 fn rejects_embedding_dimension_mismatch() {
-    let mut h = harness("dim-mismatch");
+    let mut h = harness();
     let mut bad = input("default", "x", None);
     bad.embedding = Some(vec![0.1, 0.2]); // fingerprint expects 4 dims
 
@@ -100,7 +63,7 @@ fn rejects_embedding_dimension_mismatch() {
 
 #[test]
 fn rejects_incoherent_interval() {
-    let mut h = harness("bad-interval");
+    let mut h = harness();
     let mut bad = input("default", "x", None);
     bad.valid_to = Some(bad.valid_from - chrono::Duration::seconds(1));
 
@@ -114,7 +77,7 @@ fn rejects_incoherent_interval() {
 /// index reflects only the latest content.
 #[test]
 fn test_write_then_write_with_same_fact_id_supersedes() {
-    let mut h = harness("supersede");
+    let mut h = harness();
     let fact_id = write_fact(&h.ledger, &mut h.indexes, &mut h.keyring, input("default", "versionone", None)).unwrap();
 
     let fact_id_again =
@@ -145,7 +108,7 @@ fn test_write_then_write_with_same_fact_id_supersedes() {
 /// without a new memory_write.
 #[test]
 fn test_supersede_without_rewrite_closes_interval() {
-    let mut h = harness("supersede-no-rewrite");
+    let mut h = harness();
     let fact_id = write_fact(&h.ledger, &mut h.indexes, &mut h.keyring, input("default", "still true for now", None)).unwrap();
 
     let valid_to = chrono::Utc::now();
@@ -174,14 +137,14 @@ fn test_supersede_without_rewrite_closes_interval() {
 
 #[test]
 fn supersede_unknown_fact_id_is_not_found() {
-    let mut h = harness("supersede-unknown");
+    let mut h = harness();
     let result = supersede_fact(&h.ledger, &mut h.indexes, Uuid::from_u128(999), chrono::Utc::now(), None);
     assert!(matches!(result, Err(SupersedeError::NotFound)));
 }
 
 #[test]
 fn different_fact_ids_do_not_supersede_each_other() {
-    let mut h = harness("no-cross-supersede");
+    let mut h = harness();
     write_fact(&h.ledger, &mut h.indexes, &mut h.keyring, input("default", "a", None)).unwrap();
     write_fact(&h.ledger, &mut h.indexes, &mut h.keyring, input("default", "b", None)).unwrap();
 
@@ -208,7 +171,7 @@ fn different_fact_ids_do_not_supersede_each_other() {
 /// recoverable from the other.
 #[test]
 fn test_write_rejects_superseding_a_fact_from_another_namespace() {
-    let mut h = harness("cross-namespace-supersede");
+    let mut h = harness();
 
     let fact_id = write_fact(&h.ledger, &mut h.indexes, &mut h.keyring, input("tenant-a", "alpha", None)).unwrap();
     let head_before = h.ledger.head().unwrap();

@@ -1,51 +1,13 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::{Duration, Utc};
 use uuid::Uuid;
 
-use crate::crypto::Keyring;
 use crate::explain::{explain, search};
-use crate::index::{Indexes, KeywordIndex, VectorIndex};
-use crate::ledger::Ledger;
 use crate::read_path::Query;
-use crate::record::{ModelFingerprint, NamespaceId, Outcome, SourceRef};
+use crate::record::{NamespaceId, Outcome, SourceRef};
+use crate::test_support::{fingerprint, harness, Harness};
 use crate::write_path::{write_fact, WriteInput};
 
-static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn fingerprint() -> ModelFingerprint {
-    ModelFingerprint {
-        name: "test-model".into(),
-        dimensions: 4,
-        revision_hash: [1u8; 32],
-    }
-}
-
-struct Harness {
-    dir: PathBuf,
-    ledger: Ledger,
-    keyring: Keyring,
-    indexes: Indexes,
-}
-
-impl Drop for Harness {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
-}
-
-fn harness(tag: &str) -> Harness {
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("memvault-explain-test-{tag}-{}-{n}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-
-    let ledger = Ledger::open(&dir.join("ledger.redb")).unwrap();
-    let keyring = Keyring::open(&dir.join("keys.redb")).unwrap();
-    let vector = VectorIndex::open_or_create(&dir.join("vectors.usearch"), &fingerprint()).unwrap();
-    let keyword = KeywordIndex::open_or_create(&dir.join("keyword")).unwrap();
-    Harness { dir, ledger, keyring, indexes: Indexes { vector, keyword } }
-}
 
 fn write(h: &mut Harness, content: &str, embedding: Vec<f32>, valid_from: chrono::DateTime<Utc>, valid_to: Option<chrono::DateTime<Utc>>) -> Uuid {
     write_ns(h, "default", content, embedding, valid_from, valid_to)
@@ -85,7 +47,7 @@ fn write_ns(
 /// not just the injected one.
 #[test]
 fn test_explanation_includes_all_outcomes() {
-    let mut h = harness("all-outcomes");
+    let mut h = harness();
     let now = Utc::now();
 
     // Small content -> fits the tight token budget below.
@@ -148,7 +110,7 @@ fn test_explanation_includes_all_outcomes() {
 
 #[test]
 fn explain_reconstructs_a_past_retrieval_exactly() {
-    let mut h = harness("explain-roundtrip");
+    let mut h = harness();
     write(&mut h, "hello", vec![1.0, 0.0, 0.0, 0.0], Utc::now(), None);
     h.indexes.keyword.commit().unwrap();
 
@@ -169,7 +131,7 @@ fn explain_reconstructs_a_past_retrieval_exactly() {
 
 #[test]
 fn explain_unknown_retrieval_id_is_not_found() {
-    let h = harness("explain-not-found");
+    let h = harness();
     let result = explain(&h.ledger, Uuid::new_v4());
     assert!(matches!(result, Err(crate::explain::ExplainError::NotFound)));
 }
@@ -186,7 +148,7 @@ fn explain_unknown_retrieval_id_is_not_found() {
 /// boundary this filter exists to hold.
 #[test]
 fn test_search_never_returns_another_namespaces_facts() {
-    let mut h = harness("namespace-isolation");
+    let mut h = harness();
     let now = Utc::now();
 
     let mine = write_ns(&mut h, "tenant-a", "shared secret alpha", vec![1.0, 0.0, 0.0, 0.0], now - Duration::days(1), None);
