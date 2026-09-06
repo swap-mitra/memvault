@@ -38,24 +38,21 @@ impl std::fmt::Display for ChainError {
 
 impl std::error::Error for ChainError {}
 
-/// Walks records in `seq` order and verifies the chain. Cost is linear in
-/// ledger size (product doc §6.2). An empty ledger is trivially valid.
+/// Walks records in `seq` order from `start_seq` and verifies the chain.
+/// Cost is linear in ledger size (product doc §6.2). An empty ledger is
+/// trivially valid.
 ///
 /// This detects tampering with any record that has a successor. It cannot
 /// detect tampering confined to the single most recent record, since
 /// nothing yet commits to its hash — that gap is what external checkpoint
 /// anchoring closes (product doc §6.2), not this function.
-pub fn verify_chain(records: impl Iterator<Item = Record>) -> Result<(), ChainError> {
-    verify_chain_from(records, 0)
-}
-
-/// Like [`verify_chain`], but starts at `start_seq` instead of the
-/// genesis. For `start_seq == 0` this is identical to `verify_chain`
-/// (the first record's `prev_hash` is still checked against
-/// `GENESIS_PREV_HASH`). For `start_seq > 0`, the record at `start_seq` is
-/// trusted as an already-verified resume point -- there is no predecessor
-/// in `records` to re-derive its `prev_hash` from -- and only the chain
-/// *from* there forward is confirmed. Product doc §6.2's `verify --from`.
+///
+/// `start_seq == 0` verifies from the genesis, checking the first record's
+/// `prev_hash` against `GENESIS_PREV_HASH`. For `start_seq > 0` the record
+/// at `start_seq` is trusted as an already-verified resume point -- there
+/// is no predecessor in `records` to re-derive its `prev_hash` from -- and
+/// only the chain *from* there forward is confirmed. Product doc §6.2's
+/// `verify --from`.
 pub fn verify_chain_from(records: impl Iterator<Item = Record>, start_seq: u64) -> Result<(), ChainError> {
     let mut prev: Option<Record> = None;
     let mut expected_seq = start_seq;
