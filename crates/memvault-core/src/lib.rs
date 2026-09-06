@@ -11,7 +11,6 @@ pub mod ledger;
 pub mod read_path;
 pub mod record;
 pub mod recovery;
-pub mod working_set;
 pub mod write_path;
 
 #[cfg(test)]
@@ -44,5 +43,4 @@ pub use record::{
     ModelFingerprint, NamespaceId, Outcome, Payload, Record, RecordHeader, RecordKind, Retrieval,
     SourceRef, Supersede,
 };
-pub use working_set::{SessionHandle, SessionId, SessionState, WorkingSet};
 pub use write_path::{supersede_fact, write_fact, SupersedeError, WriteError, WriteInput};
