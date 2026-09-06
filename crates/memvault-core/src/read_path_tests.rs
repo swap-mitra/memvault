@@ -1,42 +1,8 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use uuid::Uuid;
 
-use crate::index::{Indexes, KeywordIndex, VectorIndex};
 use crate::read_path::{hybrid_search, Query, SearchError};
 use crate::record::{ModelFingerprint, NamespaceId};
-
-static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn fingerprint() -> ModelFingerprint {
-    ModelFingerprint {
-        name: "test-model".into(),
-        dimensions: 4,
-        revision_hash: [1u8; 32],
-    }
-}
-
-struct Harness {
-    dir: PathBuf,
-    indexes: Indexes,
-}
-
-impl Drop for Harness {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
-}
-
-fn harness(tag: &str) -> Harness {
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("memvault-read-path-test-{tag}-{}-{n}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-
-    let vector = VectorIndex::open_or_create(&dir.join("vectors.usearch"), &fingerprint()).unwrap();
-    let keyword = KeywordIndex::open_or_create(&dir.join("keyword")).unwrap();
-    Harness { dir, indexes: Indexes { vector, keyword } }
-}
+use crate::test_support::harness;
 
 fn base_query() -> Query {
     Query {
@@ -55,7 +21,7 @@ fn base_query() -> Query {
 /// assert the doubly-ranked doc wins fusion.
 #[test]
 fn test_rrf_favors_candidate_ranked_high_in_both_lists() {
-    let mut h = harness("rrf");
+    let mut h = harness();
 
     let doubly_ranked = Uuid::from_u128(1);
     let ann_only_winner = Uuid::from_u128(2);
@@ -84,7 +50,7 @@ fn test_rrf_favors_candidate_ranked_high_in_both_lists() {
 
 #[test]
 fn as_of_query_is_rejected_as_not_yet_supported() {
-    let h = harness("as-of");
+    let h = harness();
     let mut query = base_query();
     query.as_of = Some(chrono::Utc::now());
 
@@ -94,7 +60,7 @@ fn as_of_query_is_rejected_as_not_yet_supported() {
 
 #[test]
 fn mismatched_embedding_model_is_rejected() {
-    let h = harness("fingerprint-mismatch");
+    let h = harness();
     let mut query = base_query();
     query.embedding = Some(vec![1.0, 0.0, 0.0, 0.0]);
     query.embedding_model = Some(ModelFingerprint {
@@ -109,7 +75,7 @@ fn mismatched_embedding_model_is_rejected() {
 
 #[test]
 fn empty_query_returns_no_candidates() {
-    let h = harness("empty");
+    let h = harness();
     let results = hybrid_search(&h.indexes, &base_query()).unwrap();
     assert!(results.is_empty());
 }

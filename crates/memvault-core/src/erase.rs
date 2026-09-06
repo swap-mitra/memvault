@@ -11,7 +11,7 @@ use crate::crypto::{Keyring, KeyringError};
 use crate::index::{IndexError, Indexes};
 use crate::ledger::{Ledger, LedgerError};
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum EraseError {
     /// `fact_id` has no currently-open Assert -- nothing to erase.
     /// ponytail: mirrors `supersede_fact`'s scope -- an already-closed
@@ -19,39 +19,14 @@ pub enum EraseError {
     /// erased this way yet. Nothing in the plan's exit tests needs that;
     /// upgrade path is keying off the keyring entry's presence instead of
     /// `open_facts` if closed-fact erasure is needed later.
+    #[error("no open fact with that id")]
     NotFound,
-    Ledger(LedgerError),
-    Keyring(KeyringError),
-    Index(IndexError),
-}
-
-impl std::fmt::Display for EraseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EraseError::NotFound => write!(f, "no open fact with that id"),
-            EraseError::Ledger(e) => write!(f, "{e}"),
-            EraseError::Keyring(e) => write!(f, "{e}"),
-            EraseError::Index(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for EraseError {}
-
-impl From<LedgerError> for EraseError {
-    fn from(e: LedgerError) -> Self {
-        EraseError::Ledger(e)
-    }
-}
-impl From<KeyringError> for EraseError {
-    fn from(e: KeyringError) -> Self {
-        EraseError::Keyring(e)
-    }
-}
-impl From<IndexError> for EraseError {
-    fn from(e: IndexError) -> Self {
-        EraseError::Index(e)
-    }
+    #[error(transparent)]
+    Ledger(#[from] LedgerError),
+    #[error(transparent)]
+    Keyring(#[from] KeyringError),
+    #[error(transparent)]
+    Index(#[from] IndexError),
 }
 
 /// Erases `fact_id`. Its whole supersession lineage shares one key (see
@@ -88,42 +63,9 @@ pub fn erase(ledger: &Ledger, keyring: &mut Keyring, indexes: &mut Indexes, fact
 mod tests {
     use super::*;
     use crate::crypto::content_hash;
-    use crate::index::{KeywordIndex, VectorIndex};
-    use crate::record::{ModelFingerprint, NamespaceId, Payload, SourceRef};
+    use crate::record::{NamespaceId, Payload, SourceRef};
+    use crate::test_support::{fingerprint, harness};
     use crate::write_path::{write_fact, WriteInput};
-    use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    fn fingerprint() -> ModelFingerprint {
-        ModelFingerprint { name: "test-model".into(), dimensions: 4, revision_hash: [1u8; 32] }
-    }
-
-    struct Harness {
-        dir: PathBuf,
-        ledger: Ledger,
-        keyring: Keyring,
-        indexes: Indexes,
-    }
-
-    impl Drop for Harness {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.dir);
-        }
-    }
-
-    fn harness(tag: &str) -> Harness {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("memvault-erase-test-{tag}-{}-{n}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-
-        let ledger = Ledger::open(&dir.join("ledger.redb")).unwrap();
-        let keyring = Keyring::open(&dir.join("keys.redb")).unwrap();
-        let vector = VectorIndex::open_or_create(&dir.join("vectors.usearch"), &fingerprint()).unwrap();
-        let keyword = KeywordIndex::open_or_create(&dir.join("keyword")).unwrap();
-
-        Harness { dir, ledger, keyring, indexes: Indexes { vector, keyword } }
-    }
 
     fn input(content: &str) -> WriteInput {
         WriteInput {
@@ -145,7 +87,7 @@ mod tests {
     /// the Assert (present, undecryptable).
     #[test]
     fn test_erase_preserves_chain_removes_from_search() {
-        let mut h = harness("acceptance");
+        let mut h = harness();
         let plaintext = b"the plaintext that must eventually be forgotten";
         let hash_before = content_hash(plaintext);
         let fact_id = write_fact(&h.ledger, &mut h.indexes, &mut h.keyring, input("the plaintext that must eventually be forgotten")).unwrap();
@@ -182,7 +124,7 @@ mod tests {
 
     #[test]
     fn erase_unknown_fact_id_is_not_found() {
-        let mut h = harness("unknown");
+        let mut h = harness();
         let result = erase(&h.ledger, &mut h.keyring, &mut h.indexes, Uuid::from_u128(999), "n/a".into());
         assert!(matches!(result, Err(EraseError::NotFound)));
     }

@@ -2,18 +2,11 @@
 //! makes the CLI exit non-zero and report the first diverging seq.
 
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use memvault_core::record::{canonical_bytes, decode_record, Payload};
 use redb::{ReadableTable, TableDefinition};
 
 const RECORDS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("records");
-
-fn temp_data_dir(tag: &str) -> std::path::PathBuf {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("memvault-cli-verify-test-{tag}-{}-{n}", std::process::id()))
-}
 
 fn run(data_dir: &std::path::Path, args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_memvault"))
@@ -46,7 +39,8 @@ fn corrupt_ciphertext_at(ledger_path: &std::path::Path, seq: u64) {
 
 #[test]
 fn test_cli_verify_reports_divergent_seq() {
-    let data_dir = temp_data_dir("divergent");
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = tmp.path();
 
     let first = run(&data_dir, &["write", "--namespace", "default", "--content", "alpha bravo charlie"]);
     assert!(first.status.success(), "first write failed: {}", String::from_utf8_lossy(&first.stderr));
@@ -69,7 +63,8 @@ fn test_cli_verify_reports_divergent_seq() {
 
 #[test]
 fn test_cli_verify_from_skips_a_trusted_prefix() {
-    let data_dir = temp_data_dir("from-skip");
+    let tmp = tempfile::tempdir().expect("temp dir");
+    let data_dir = tmp.path();
 
     for content in ["alpha", "bravo", "charlie"] {
         let out = run(&data_dir, &["write", "--namespace", "default", "--content", content]);

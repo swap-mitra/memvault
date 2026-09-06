@@ -30,13 +30,16 @@ use crate::record::{self, Assert, DecodeError, Erase, NamespaceId, Payload, Reco
 
 const RECORDS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("records");
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum LedgerError {
+    #[error("ledger storage error: {0}")]
     Redb(redb::Error),
-    Decode(DecodeError),
+    #[error("ledger record corrupt: {0}")]
+    Decode(#[from] DecodeError),
     /// A write supplied a `fact_id` that is open in a different namespace.
     /// Unlike the other two this is the caller's mistake, not broken
     /// storage -- see `write_assert` for why it can't be honoured.
+    #[error("fact {fact_id} belongs to namespace {}, so a write to namespace {} cannot supersede it", .fact_namespace.0, .write_namespace.0)]
     CrossNamespaceSupersede {
         fact_id: Uuid,
         fact_namespace: NamespaceId,
@@ -44,43 +47,7 @@ pub enum LedgerError {
     },
 }
 
-impl std::fmt::Display for LedgerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LedgerError::Redb(e) => write!(f, "ledger storage error: {e}"),
-            LedgerError::Decode(e) => write!(f, "ledger record corrupt: {e}"),
-            LedgerError::CrossNamespaceSupersede { fact_id, fact_namespace, write_namespace } => write!(
-                f,
-                "fact {fact_id} belongs to namespace {}, so a write to namespace {} cannot supersede it",
-                fact_namespace.0, write_namespace.0
-            ),
-        }
-    }
-}
-
-impl std::error::Error for LedgerError {}
-
-impl From<DecodeError> for LedgerError {
-    fn from(e: DecodeError) -> Self {
-        LedgerError::Decode(e)
-    }
-}
-
-macro_rules! redb_error {
-    ($t:ty) => {
-        impl From<$t> for LedgerError {
-            fn from(e: $t) -> Self {
-                LedgerError::Redb(e.into())
-            }
-        }
-    };
-}
-
-redb_error!(redb::DatabaseError);
-redb_error!(redb::TransactionError);
-redb_error!(redb::TableError);
-redb_error!(redb::StorageError);
-redb_error!(redb::CommitError);
+crate::redb_error!(LedgerError, LedgerError::Redb);
 
 pub struct Ledger {
     db: redb::Database,
@@ -330,19 +297,10 @@ pub struct WriteEraseOutcome {
     pub erase_seq: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum VerifyError {
+    #[error(transparent)]
     Ledger(LedgerError),
+    #[error(transparent)]
     Chain(chain::ChainError),
 }
-
-impl std::fmt::Display for VerifyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            VerifyError::Ledger(e) => write!(f, "{e}"),
-            VerifyError::Chain(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for VerifyError {}

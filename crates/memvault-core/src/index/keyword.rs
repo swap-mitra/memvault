@@ -62,17 +62,11 @@ impl KeywordIndex {
         let keywords_field = schema_builder.add_text_field("keywords", TEXT);
         let schema = schema_builder.build();
 
-        let dir = tantivy::directory::MmapDirectory::open(path).map_err(|e| IndexError::Tantivy(e.to_string()))?;
-        let index = Index::open_or_create(dir, schema).map_err(|e| IndexError::Tantivy(e.to_string()))?;
+        let dir = tantivy::directory::MmapDirectory::open(path)?;
+        let index = Index::open_or_create(dir, schema)?;
 
-        let writer = index
-            .writer::<TantivyDocument>(50_000_000)
-            .map_err(|e| IndexError::Tantivy(e.to_string()))?;
-        let reader = index
-            .reader_builder()
-            .reload_policy(ReloadPolicy::Manual)
-            .try_into()
-            .map_err(|e: tantivy::TantivyError| IndexError::Tantivy(e.to_string()))?;
+        let writer = index.writer::<TantivyDocument>(50_000_000)?;
+        let reader: IndexReader = index.reader_builder().reload_policy(ReloadPolicy::Manual).try_into()?;
 
         let watermark_path = watermark_path(path);
         let watermark = read_watermark(&watermark_path)?;
@@ -96,7 +90,7 @@ impl KeywordIndex {
         for keyword in keywords {
             doc.add_text(self.keywords_field, keyword);
         }
-        self.writer.add_document(doc).map_err(|e| IndexError::Tantivy(e.to_string()))?;
+        self.writer.add_document(doc)?;
         Ok(())
     }
 
@@ -109,8 +103,8 @@ impl KeywordIndex {
     /// Commits pending writes and reloads the reader, so a search
     /// immediately after this call sees them.
     pub fn commit(&mut self) -> Result<(), IndexError> {
-        self.writer.commit().map_err(|e| IndexError::Tantivy(e.to_string()))?;
-        self.reader.reload().map_err(|e| IndexError::Tantivy(e.to_string()))?;
+        self.writer.commit()?;
+        self.reader.reload()?;
         Ok(())
     }
 
@@ -118,15 +112,13 @@ impl KeywordIndex {
         let searcher = self.reader.searcher();
         let mut query_parser = QueryParser::for_index(&self.index, vec![self.content_field, self.keywords_field]);
         query_parser.set_field_boost(self.keywords_field, KEYWORD_FIELD_BOOST);
-        let parsed = query_parser.parse_query(query).map_err(|e| IndexError::Tantivy(e.to_string()))?;
+        let parsed = query_parser.parse_query(query)?;
 
-        let top_docs = searcher
-            .search(&parsed, &TopDocs::with_limit(k).order_by_score())
-            .map_err(|e| IndexError::Tantivy(e.to_string()))?;
+        let top_docs = searcher.search(&parsed, &TopDocs::with_limit(k).order_by_score())?;
 
         let mut results = Vec::with_capacity(top_docs.len());
         for (rank, (score, doc_address)) in top_docs.into_iter().enumerate() {
-            let doc: TantivyDocument = searcher.doc(doc_address).map_err(|e| IndexError::Tantivy(e.to_string()))?;
+            let doc: TantivyDocument = searcher.doc(doc_address)?;
             let fact_id_str = doc
                 .get_first(self.fact_id_field)
                 .and_then(|v| v.as_str())
@@ -154,7 +146,7 @@ impl KeywordIndex {
     /// recovery when the watermark is in an impossible state and this
     /// index cannot be trusted incrementally.
     pub fn reset(&mut self) -> Result<(), IndexError> {
-        self.writer.delete_all_documents().map_err(|e| IndexError::Tantivy(e.to_string()))?;
+        self.writer.delete_all_documents()?;
         self.commit()?;
         self.set_watermark(0)
     }

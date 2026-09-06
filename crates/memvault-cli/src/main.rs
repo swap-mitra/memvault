@@ -12,9 +12,10 @@ use clap::{Parser, Subcommand};
 use uuid::Uuid;
 
 use memvault_core::{
-    default_fingerprint, erase, explain, memory_as_of, placeholder_embedding, recover, search,
-    supersede_fact, write_fact, AsOfQuery, Explanation, Indexes, KeywordIndex, Keyring, Ledger,
-    NamespaceId, Outcome, Payload, Query, RecoveryConfig, SourceRef, VectorIndex, WriteInput,
+    default_fingerprint, erase, explain, explanation_row, memory_as_of, open_stores, outcome_cell,
+    placeholder_embedding, recover, search, supersede_fact, write_fact, AsOfQuery, Explanation,
+    Indexes, Keyring, Ledger, NamespaceId, Outcome, Payload, Query, RecoveryConfig, SourceRef,
+    WriteInput, EXPLANATION_HEADER,
 };
 
 #[derive(Parser)]
@@ -104,13 +105,9 @@ struct Stores {
     indexes: Indexes,
 }
 
-fn open_stores(data_dir: &Path) -> Result<Stores, Box<dyn std::error::Error>> {
-    std::fs::create_dir_all(data_dir)?;
-    let ledger = Ledger::open(&data_dir.join("ledger.redb"))?;
-    let keyring = Keyring::open(&data_dir.join("keys.redb"))?;
-    let vector = VectorIndex::open_or_create(&data_dir.join("vectors.usearch"), &default_fingerprint())?;
-    let keyword = KeywordIndex::open_or_create(&data_dir.join("keyword"))?;
-    Ok(Stores { ledger, keyring, indexes: Indexes { vector, keyword } })
+fn open(data_dir: &Path) -> Result<Stores, Box<dyn std::error::Error>> {
+    let (ledger, keyring, indexes) = open_stores(data_dir)?;
+    Ok(Stores { ledger, keyring, indexes })
 }
 
 /// True only for a real terminal with color not explicitly disabled
@@ -144,27 +141,13 @@ fn outcome_sgr_code(outcome: Outcome) -> &'static str {
 
 fn print_explanations(explanations: &[Explanation]) {
     let color = color_enabled();
-    let header = format!(
-        "{:<36} {:>8} {:>10} {:>8} {:>10} {:>9} {:>9} {:>9} {:>13} {:>6}",
-        "fact_id", "ann_rank", "ann_dist", "bm25_rk", "bm25_score", "rrf", "decay_wt", "final", "outcome", "tokens"
-    );
-    println!("{}", colorize(&header, "1", color)); // bold
+    println!("{}", colorize(EXPLANATION_HEADER, "1", color)); // bold
 
     for e in explanations {
-        let outcome_padded = format!("{:>13}", format!("{:?}", e.outcome));
-        let outcome_field = colorize(&outcome_padded, outcome_sgr_code(e.outcome), color);
-        println!(
-            "{:<36} {:>8} {:>10} {:>8} {:>10} {:>9.4} {:>9.4} {:>9.4} {outcome_field} {:>6}",
-            e.fact_id,
-            e.ann_rank.map(|r| r.to_string()).unwrap_or_else(|| "-".into()),
-            e.ann_distance.map(|d| format!("{d:.4}")).unwrap_or_else(|| "-".into()),
-            e.bm25_rank.map(|r| r.to_string()).unwrap_or_else(|| "-".into()),
-            e.bm25_score.map(|s| format!("{s:.4}")).unwrap_or_else(|| "-".into()),
-            e.rrf_score,
-            e.decay_weight,
-            e.final_score,
-            e.token_cost,
-        );
+        // Colour the padded cell, never the row: the escape bytes would
+        // otherwise count toward the column width.
+        let outcome = colorize(&outcome_cell(e), outcome_sgr_code(e.outcome), color);
+        println!("{}", explanation_row(e, &outcome));
     }
 }
 
@@ -173,7 +156,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Command::Write { namespace, content, pin, fact_id } => {
-            let mut stores = open_stores(&cli.data_dir)?;
+            let mut stores = open(&cli.data_dir)?;
             let embedding = placeholder_embedding(&content);
             let written_id = write_fact(
                 &stores.ledger,
@@ -198,7 +181,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Command::Search { namespace, query, k, max_tokens } => {
-            let stores = open_stores(&cli.data_dir)?;
+            let stores = open(&cli.data_dir)?;
             let embedding = placeholder_embedding(&query);
             let (explanations, retrieval_id) = search(
                 &stores.ledger,
@@ -217,12 +200,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             print_explanations(&explanations);
         }
         Command::Explain { retrieval_id } => {
-            let stores = open_stores(&cli.data_dir)?;
+            let stores = open(&cli.data_dir)?;
             let explanations = explain(&stores.ledger, retrieval_id)?;
             print_explanations(&explanations);
         }
         Command::AsOf { namespace, valid_time, transaction_time } => {
-            let stores = open_stores(&cli.data_dir)?;
+            let stores = open(&cli.data_dir)?;
             let facts = memory_as_of(&stores.ledger, &stores.keyring, &NamespaceId(namespace), AsOfQuery { valid_time, transaction_time })?;
             for f in &facts {
                 let content = String::from_utf8_lossy(&f.content);
@@ -231,28 +214,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Command::Supersede { fact_id, valid_to, reason } => {
-            let mut stores = open_stores(&cli.data_dir)?;
+            let mut stores = open(&cli.data_dir)?;
             let valid_to = valid_to.unwrap_or_else(Utc::now);
             supersede_fact(&stores.ledger, &mut stores.indexes, fact_id, valid_to, reason)?;
             println!("superseded fact_id: {fact_id}");
         }
         Command::Forget { fact_id, reason } => {
-            let mut stores = open_stores(&cli.data_dir)?;
+            let mut stores = open(&cli.data_dir)?;
             erase(&stores.ledger, &mut stores.keyring, &mut stores.indexes, fact_id, reason)?;
             println!("forgot fact_id: {fact_id}");
         }
         Command::Verify { from } => {
-            let stores = open_stores(&cli.data_dir)?;
+            let stores = open(&cli.data_dir)?;
             stores.ledger.verify_from(from)?;
             println!("chain verified from seq {from}");
         }
         Command::Replay => {
-            let mut stores = open_stores(&cli.data_dir)?;
+            let mut stores = open(&cli.data_dir)?;
             let report = recover(&stores.ledger, &mut stores.indexes, &stores.keyring, &default_fingerprint(), RecoveryConfig { verify_chain: true })?;
             println!("{report:?}");
         }
         Command::DumpRecord { seq } => {
-            let stores = open_stores(&cli.data_dir)?;
+            let stores = open(&cli.data_dir)?;
             let record = stores.ledger.read(seq)?.ok_or_else(|| format!("no record at seq {seq}"))?;
             println!("seq {} kind {:?} recorded_at {}", record.header.seq, record.header.kind, record.header.recorded_at.to_rfc3339());
             match record.payload {

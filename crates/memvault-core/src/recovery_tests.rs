@@ -1,49 +1,12 @@
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use uuid::Uuid;
 
-use crate::crypto::Keyring;
 use crate::index::{Indexes, KeywordIndex, VectorIndex};
-use crate::ledger::Ledger;
 use crate::record::{ModelFingerprint, NamespaceId, SourceRef};
 use crate::recovery::{recover, IndexKind, RecoveryConfig};
+use crate::test_support::{fingerprint, harness, Harness};
 use crate::write_path::{write_fact, WriteInput};
 
-static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn fingerprint() -> ModelFingerprint {
-    ModelFingerprint {
-        name: "test-model".into(),
-        dimensions: 4,
-        revision_hash: [1u8; 32],
-    }
-}
-
-struct Harness {
-    dir: PathBuf,
-    ledger: Ledger,
-    keyring: Keyring,
-    indexes: Indexes,
-}
-
-impl Drop for Harness {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
-}
-
-fn harness(tag: &str) -> Harness {
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("memvault-recovery-test-{tag}-{}-{n}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-
-    let ledger = Ledger::open(&dir.join("ledger.redb")).unwrap();
-    let keyring = Keyring::open(&dir.join("keys.redb")).unwrap();
-    let vector = VectorIndex::open_or_create(&dir.join("vectors.usearch"), &fingerprint()).unwrap();
-    let keyword = KeywordIndex::open_or_create(&dir.join("keyword")).unwrap();
-    Harness { dir, ledger, keyring, indexes: Indexes { vector, keyword } }
-}
 
 /// Distinct, reproducible embeddings per fact so search results are
 /// comparable between two independently-built index sets.
@@ -82,7 +45,7 @@ fn write_n_facts(h: &mut Harness, n: u64) {
 
 #[test]
 fn recover_is_a_no_op_when_indexes_are_already_current() {
-    let mut h = harness("no-op");
+    let mut h = harness();
     write_n_facts(&mut h, 5);
 
     let report = recover(&h.ledger, &mut h.indexes, &h.keyring, &fingerprint(), RecoveryConfig::default()).unwrap();
@@ -93,7 +56,7 @@ fn recover_is_a_no_op_when_indexes_are_already_current() {
 
 #[test]
 fn recover_rebuilds_on_fingerprint_mismatch() {
-    let mut h = harness("fingerprint-mismatch");
+    let mut h = harness();
     write_n_facts(&mut h, 3);
 
     let different = ModelFingerprint { name: "other-model".into(), dimensions: 4, revision_hash: [9u8; 32] };
@@ -113,7 +76,7 @@ fn recover_rebuilds_on_fingerprint_mismatch() {
 /// subsequent search must match a from-scratch rebuild exactly.
 #[test]
 fn test_recovery_after_simulated_crash() {
-    let mut h = harness("simulated-crash");
+    let mut h = harness();
     write_n_facts(&mut h, 10);
     let head = h.ledger.head().unwrap();
 

@@ -17,60 +17,28 @@ use crate::record::Encrypted;
 
 const KEYS_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("keys");
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum KeyringError {
+    #[error("keyring storage error: {0}")]
     Redb(redb::Error),
 }
 
-impl std::fmt::Display for KeyringError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            KeyringError::Redb(e) => write!(f, "keyring storage error: {e}"),
-        }
-    }
-}
+crate::redb_error!(KeyringError, KeyringError::Redb);
 
-impl std::error::Error for KeyringError {}
-
-macro_rules! redb_error {
-    ($t:ty) => {
-        impl From<$t> for KeyringError {
-            fn from(e: $t) -> Self {
-                KeyringError::Redb(e.into())
-            }
-        }
-    };
-}
-
-redb_error!(redb::DatabaseError);
-redb_error!(redb::TransactionError);
-redb_error!(redb::TableError);
-redb_error!(redb::StorageError);
-redb_error!(redb::CommitError);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DecryptError {
     /// No key on file for this fact_id: either it was erased (product doc
     /// §6.5) or never existed. The ciphertext alone can't distinguish
     /// those, and callers don't need it to -- either way it can't be read.
+    #[error("key destroyed or never existed")]
     KeyDestroyed,
     /// AEAD authentication failed: wrong key, corrupted ciphertext, or a
     /// tampered nonce.
+    #[error("ciphertext failed authentication")]
     InvalidCiphertext,
+    #[error("keyring storage error: {0}")]
     Storage(String),
 }
-
-impl std::fmt::Display for DecryptError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DecryptError::KeyDestroyed => write!(f, "key destroyed or never existed"),
-            DecryptError::InvalidCiphertext => write!(f, "ciphertext failed authentication"),
-            DecryptError::Storage(e) => write!(f, "keyring storage error: {e}"),
-        }
-    }
-}
-
-impl std::error::Error for DecryptError {}
 
 pub struct Keyring {
     db: redb::Database,
@@ -173,27 +141,12 @@ pub fn content_hash(plaintext: &[u8]) -> [u8; 32] {
 mod tests {
     use super::*;
 
-    fn temp_keyring_path(tag: &str) -> std::path::PathBuf {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!(
-            "memvault-keyring-test-{tag}-{}-{n}.redb",
-            std::process::id()
-        ))
-    }
-
-    struct TempPath(std::path::PathBuf);
-    impl Drop for TempPath {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_file(&self.0);
-        }
-    }
+    use crate::test_support::tmp;
 
     #[test]
     fn encrypt_then_decrypt_round_trips() {
-        let path = TempPath(temp_keyring_path("roundtrip"));
-        let mut keyring = Keyring::open(&path.0).unwrap();
+        let dir = tmp();
+        let mut keyring = Keyring::open(&dir.path().join("keys.redb")).unwrap();
         let fact_id = Uuid::from_u128(1);
 
         let encrypted = keyring.encrypt(fact_id, b"hello memvault").unwrap();
@@ -204,8 +157,8 @@ mod tests {
 
     #[test]
     fn wrong_fact_id_cannot_decrypt() {
-        let path = TempPath(temp_keyring_path("wrong-key"));
-        let mut keyring = Keyring::open(&path.0).unwrap();
+        let dir = tmp();
+        let mut keyring = Keyring::open(&dir.path().join("keys.redb")).unwrap();
 
         let encrypted = keyring.encrypt(Uuid::from_u128(1), b"secret").unwrap();
         let result = keyring.decrypt(Uuid::from_u128(2), &encrypted);
@@ -218,8 +171,8 @@ mod tests {
     /// (computed independently, over the plaintext) still verifies.
     #[test]
     fn test_erase_makes_content_unrecoverable() {
-        let path = TempPath(temp_keyring_path("erase"));
-        let mut keyring = Keyring::open(&path.0).unwrap();
+        let dir = tmp();
+        let mut keyring = Keyring::open(&dir.path().join("keys.redb")).unwrap();
         let fact_id = Uuid::from_u128(42);
         let plaintext = b"the plaintext that must eventually be forgotten";
 
@@ -236,8 +189,8 @@ mod tests {
 
     #[test]
     fn tampered_ciphertext_fails_authentication_not_silently() {
-        let path = TempPath(temp_keyring_path("tamper"));
-        let mut keyring = Keyring::open(&path.0).unwrap();
+        let dir = tmp();
+        let mut keyring = Keyring::open(&dir.path().join("keys.redb")).unwrap();
         let fact_id = Uuid::from_u128(7);
 
         let mut encrypted = keyring.encrypt(fact_id, b"authentic").unwrap();

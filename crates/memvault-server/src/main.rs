@@ -21,9 +21,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use memvault_core::{
-    default_fingerprint, erase, explain, memory_as_of, recover, supersede_fact, write_fact,
-    AsOfQuery, Explanation, Indexes, KeywordIndex, Keyring, Ledger, NamespaceId, Query,
-    RecoveryConfig, SourceRef, VectorIndex, WriteInput,
+    default_fingerprint, erase, explain, explanation_row, memory_as_of, open_stores, outcome_cell,
+    recover, supersede_fact, write_fact, AsOfQuery, Explanation, Indexes, Keyring, Ledger,
+    NamespaceId, Query, RecoveryConfig, SourceRef, WriteInput, EXPLANATION_HEADER,
 };
 
 fn default_k() -> usize {
@@ -97,24 +97,10 @@ struct SearchParams {
 }
 
 fn format_explanations(retrieval_id: Uuid, explanations: &[Explanation]) -> String {
-    let mut out = format!("retrieval_id: {retrieval_id}\n");
-    out.push_str(
-        "fact_id                              ann_rank   ann_dist  bm25_rk bm25_score       rrf  decay_wt     final       outcome tokens\n",
-    );
+    let mut out = format!("retrieval_id: {retrieval_id}\n{EXPLANATION_HEADER}\n");
     for e in explanations {
-        out.push_str(&format!(
-            "{:<36} {:>8} {:>10} {:>8} {:>10} {:>9.4} {:>9.4} {:>9.4} {:>13} {:>6}\n",
-            e.fact_id,
-            e.ann_rank.map(|r| r.to_string()).unwrap_or_else(|| "-".into()),
-            e.ann_distance.map(|d| format!("{d:.4}")).unwrap_or_else(|| "-".into()),
-            e.bm25_rank.map(|r| r.to_string()).unwrap_or_else(|| "-".into()),
-            e.bm25_score.map(|s| format!("{s:.4}")).unwrap_or_else(|| "-".into()),
-            e.rrf_score,
-            e.decay_weight,
-            e.final_score,
-            format!("{:?}", e.outcome),
-            e.token_cost,
-        ));
+        out.push_str(&explanation_row(e, &outcome_cell(e)));
+        out.push('\n');
     }
     out
 }
@@ -132,12 +118,7 @@ struct Stores {
 
 impl Stores {
     fn open(data_dir: &Path) -> Result<Self, Box<dyn std::error::Error>> {
-        std::fs::create_dir_all(data_dir)?;
-        let ledger = Ledger::open(&data_dir.join("ledger.redb"))?;
-        let keyring = Keyring::open(&data_dir.join("keys.redb"))?;
-        let vector = VectorIndex::open_or_create(&data_dir.join("vectors.usearch"), &default_fingerprint())?;
-        let keyword = KeywordIndex::open_or_create(&data_dir.join("keyword"))?;
-        let mut indexes = Indexes { vector, keyword };
+        let (ledger, keyring, mut indexes) = open_stores(data_dir)?;
 
         let report = recover(&ledger, &mut indexes, &keyring, &default_fingerprint(), RecoveryConfig { verify_chain: true })?;
         eprintln!("memvault-server: recovery report: {report:?}");

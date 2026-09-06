@@ -52,35 +52,16 @@ pub struct FusedCandidate {
     pub rrf_score: f32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SearchError {
-    Index(IndexError),
+    #[error(transparent)]
+    Index(#[from] IndexError),
     /// See the module doc comment: real point-in-time queries need
     /// historical index state this read path doesn't retain.
+    #[error("point-in-time (as_of) queries are not supported yet")]
     AsOfNotYetSupported,
+    #[error("query embedding's model fingerprint does not match the index")]
     EmbeddingModelMismatch,
-}
-
-impl std::fmt::Display for SearchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SearchError::Index(e) => write!(f, "{e}"),
-            SearchError::AsOfNotYetSupported => {
-                write!(f, "point-in-time (as_of) queries are not supported yet")
-            }
-            SearchError::EmbeddingModelMismatch => {
-                write!(f, "query embedding's model fingerprint does not match the index")
-            }
-        }
-    }
-}
-
-impl std::error::Error for SearchError {}
-
-impl From<IndexError> for SearchError {
-    fn from(e: IndexError) -> Self {
-        SearchError::Index(e)
-    }
 }
 
 pub fn hybrid_search(indexes: &Indexes, query: &Query) -> Result<Vec<FusedCandidate>, SearchError> {

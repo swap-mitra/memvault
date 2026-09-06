@@ -37,37 +37,19 @@ pub struct RecoveryReport {
     pub verified: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum RecoveryError {
-    Ledger(LedgerError),
-    Index(IndexError),
+    #[error(transparent)]
+    Ledger(#[from] LedgerError),
+    #[error(transparent)]
+    Index(#[from] IndexError),
+    #[error(transparent)]
     Chain(chain::ChainError),
+    #[error(transparent)]
     Decrypt(DecryptError),
 }
 
-impl std::fmt::Display for RecoveryError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RecoveryError::Ledger(e) => write!(f, "{e}"),
-            RecoveryError::Index(e) => write!(f, "{e}"),
-            RecoveryError::Chain(e) => write!(f, "{e}"),
-            RecoveryError::Decrypt(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for RecoveryError {}
-
-impl From<LedgerError> for RecoveryError {
-    fn from(e: LedgerError) -> Self {
-        RecoveryError::Ledger(e)
-    }
-}
-impl From<IndexError> for RecoveryError {
-    fn from(e: IndexError) -> Self {
-        RecoveryError::Index(e)
-    }
-}
+/// Fans out across two variants, so it cannot be a `#[from]`.
 impl From<VerifyError> for RecoveryError {
     fn from(e: VerifyError) -> Self {
         match e {

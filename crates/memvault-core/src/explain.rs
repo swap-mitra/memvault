@@ -12,7 +12,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::budget::pack_to_budget;
-use crate::decay::{apply_decay, DecayConfig};
+use crate::decay::{apply_decay, DecayConfig, ScoredCandidate};
 use crate::index::{IndexError, Indexes};
 use crate::ledger::{Ledger, LedgerError};
 use crate::read_path::{hybrid_search, FusedCandidate, Query, SearchError as HybridSearchError};
@@ -24,39 +24,14 @@ use crate::record::{Explanation, NamespaceId, Outcome, Payload, Retrieval};
 const DEFAULT_HALF_LIFE_DAYS: f64 = 30.0;
 const DEFAULT_DECAY_FLOOR: f64 = 0.15;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SearchError {
-    Hybrid(HybridSearchError),
-    Ledger(LedgerError),
-    Index(IndexError),
-}
-
-impl std::fmt::Display for SearchError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SearchError::Hybrid(e) => write!(f, "{e}"),
-            SearchError::Ledger(e) => write!(f, "{e}"),
-            SearchError::Index(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for SearchError {}
-
-impl From<HybridSearchError> for SearchError {
-    fn from(e: HybridSearchError) -> Self {
-        SearchError::Hybrid(e)
-    }
-}
-impl From<LedgerError> for SearchError {
-    fn from(e: LedgerError) -> Self {
-        SearchError::Ledger(e)
-    }
-}
-impl From<IndexError> for SearchError {
-    fn from(e: IndexError) -> Self {
-        SearchError::Index(e)
-    }
+    #[error(transparent)]
+    Hybrid(#[from] HybridSearchError),
+    #[error(transparent)]
+    Ledger(#[from] LedgerError),
+    #[error(transparent)]
+    Index(#[from] IndexError),
 }
 
 struct Resolved {
@@ -90,6 +65,25 @@ fn explanation(fused: &FusedCandidate, ledger_seq: u64, decay_weight: f32, final
         final_score,
         outcome,
         token_cost,
+    }
+}
+
+/// Same, for a candidate that has been through decay: it carries its own
+/// weight and final score, and `resolved` holds what the ledger said.
+fn scored_explanation(c: &ScoredCandidate, resolved: &HashMap<Uuid, Resolved>, outcome: Outcome) -> Explanation {
+    let r = &resolved[&c.fact_id];
+    Explanation {
+        fact_id: c.fact_id,
+        ledger_seq: r.ledger_seq,
+        ann_rank: c.ann_rank,
+        ann_distance: c.ann_distance,
+        bm25_rank: c.bm25_rank,
+        bm25_score: c.bm25_score,
+        rrf_score: c.rrf_score,
+        decay_weight: c.decay_weight,
+        final_score: c.final_score,
+        outcome,
+        token_cost: r.token_cost,
     }
 }
 
@@ -153,63 +147,29 @@ pub fn search(ledger: &Ledger, indexes: &Indexes, query: Query) -> Result<(Vec<E
         });
     }
 
-    let pinned_map: HashMap<Uuid, bool> = resolved.iter().map(|r| (r.fused.fact_id, r.pinned)).collect();
-    let access_map: HashMap<Uuid, chrono::DateTime<Utc>> = resolved.iter().map(|r| (r.fused.fact_id, r.last_accessed_stand_in)).collect();
-    let seq_map: HashMap<Uuid, u64> = resolved.iter().map(|r| (r.fused.fact_id, r.ledger_seq)).collect();
-    let cost_map: HashMap<Uuid, u32> = resolved.iter().map(|r| (r.fused.fact_id, r.token_cost)).collect();
+    let candidates: Vec<FusedCandidate> = resolved.iter().map(|r| r.fused.clone()).collect();
+    let resolved: HashMap<Uuid, Resolved> = resolved.into_iter().map(|r| (r.fused.fact_id, r)).collect();
 
-    let candidates: Vec<FusedCandidate> = resolved.into_iter().map(|r| r.fused).collect();
     let cfg = DecayConfig { half_life_days: DEFAULT_HALF_LIFE_DAYS, floor: DEFAULT_DECAY_FLOOR };
-    let mut scored = apply_decay(candidates, |id| pinned_map[&id], |id| access_map[&id], now, &cfg);
+    let mut scored = apply_decay(
+        candidates,
+        |id| resolved[&id].pinned,
+        |id| resolved[&id].last_accessed_stand_in,
+        now,
+        &cfg,
+    );
     scored.sort_by(|a, b| b.final_score.partial_cmp(&a.final_score).expect("final_score is never NaN"));
 
     let cut_by_k = if scored.len() > k { scored.split_off(k) } else { Vec::new() };
     for c in &cut_by_k {
-        explanations.push(Explanation {
-            fact_id: c.fact_id,
-            ledger_seq: seq_map[&c.fact_id],
-            ann_rank: c.ann_rank,
-            ann_distance: c.ann_distance,
-            bm25_rank: c.bm25_rank,
-            bm25_score: c.bm25_score,
-            rrf_score: c.rrf_score,
-            decay_weight: c.decay_weight,
-            final_score: c.final_score,
-            outcome: Outcome::CutByK,
-            token_cost: cost_map[&c.fact_id],
-        });
+        explanations.push(scored_explanation(c, &resolved, Outcome::CutByK));
     }
 
-    let (packed, skipped) = pack_to_budget(scored, max_tokens, |id| cost_map[&id]);
-    for p in &packed {
-        explanations.push(Explanation {
-            fact_id: p.candidate.fact_id,
-            ledger_seq: seq_map[&p.candidate.fact_id],
-            ann_rank: p.candidate.ann_rank,
-            ann_distance: p.candidate.ann_distance,
-            bm25_rank: p.candidate.bm25_rank,
-            bm25_score: p.candidate.bm25_score,
-            rrf_score: p.candidate.rrf_score,
-            decay_weight: p.candidate.decay_weight,
-            final_score: p.candidate.final_score,
-            outcome: Outcome::Injected,
-            token_cost: p.token_cost,
-        });
-    }
-    for s in &skipped {
-        explanations.push(Explanation {
-            fact_id: s.candidate.fact_id,
-            ledger_seq: seq_map[&s.candidate.fact_id],
-            ann_rank: s.candidate.ann_rank,
-            ann_distance: s.candidate.ann_distance,
-            bm25_rank: s.candidate.bm25_rank,
-            bm25_score: s.candidate.bm25_score,
-            rrf_score: s.candidate.rrf_score,
-            decay_weight: s.candidate.decay_weight,
-            final_score: s.candidate.final_score,
-            outcome: Outcome::CutByBudget,
-            token_cost: s.token_cost,
-        });
+    let (packed, skipped) = pack_to_budget(scored, max_tokens, |id| resolved[&id].token_cost);
+    for (candidates, outcome) in [(&packed, Outcome::Injected), (&skipped, Outcome::CutByBudget)] {
+        for p in candidates {
+            explanations.push(scored_explanation(&p.candidate, &resolved, outcome));
+        }
     }
 
     let retrieval_id = Uuid::new_v4();
@@ -227,22 +187,40 @@ pub fn search(ledger: &Ledger, indexes: &Indexes, query: Query) -> Result<(Vec<E
     Ok((explanations, retrieval_id))
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ExplainError {
+    #[error(transparent)]
     Ledger(LedgerError),
+    #[error("no retrieval with that id in the ledger")]
     NotFound,
 }
 
-impl std::fmt::Display for ExplainError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ExplainError::Ledger(e) => write!(f, "{e}"),
-            ExplainError::NotFound => write!(f, "no retrieval with that id in the ledger"),
-        }
-    }
+/// The provenance table's column widths, shared so the CLI can colour a
+/// cell without recomputing the alignment underneath it.
+pub const EXPLANATION_HEADER: &str = "fact_id                              ann_rank   ann_dist  bm25_rk bm25_score       rrf  decay_wt     final       outcome tokens";
+
+/// One `Explanation` as a row under [`EXPLANATION_HEADER`], with the outcome
+/// cell already padded to its column so a caller can wrap it in escape codes
+/// without disturbing the alignment. No trailing newline.
+pub fn explanation_row(e: &Explanation, outcome_cell: &str) -> String {
+    format!(
+        "{:<36} {:>8} {:>10} {:>8} {:>10} {:>9.4} {:>9.4} {:>9.4} {outcome_cell} {:>6}",
+        e.fact_id,
+        e.ann_rank.map(|r| r.to_string()).unwrap_or_else(|| "-".into()),
+        e.ann_distance.map(|d| format!("{d:.4}")).unwrap_or_else(|| "-".into()),
+        e.bm25_rank.map(|r| r.to_string()).unwrap_or_else(|| "-".into()),
+        e.bm25_score.map(|s| format!("{s:.4}")).unwrap_or_else(|| "-".into()),
+        e.rrf_score,
+        e.decay_weight,
+        e.final_score,
+        e.token_cost,
+    )
 }
 
-impl std::error::Error for ExplainError {}
+/// The outcome cell padded to its column width, uncoloured.
+pub fn outcome_cell(e: &Explanation) -> String {
+    format!("{:>13}", format!("{:?}", e.outcome))
+}
 
 /// Reconstructs a past retrieval exactly from its `Retrieval` ledger
 /// record. A linear scan: fine at the ledger sizes this project targets,

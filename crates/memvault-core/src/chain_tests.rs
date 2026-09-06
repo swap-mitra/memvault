@@ -3,7 +3,7 @@
 use chrono::{TimeZone, Utc};
 use uuid::Uuid;
 
-use crate::chain::{record_hash, verify_chain, verify_chain_from, ChainError, GENESIS_PREV_HASH};
+use crate::chain::{record_hash, verify_chain_from, ChainError, GENESIS_PREV_HASH};
 use crate::record::{
     Assert, Encrypted, ModelFingerprint, NamespaceId, Payload, Record, SourceRef,
 };
@@ -54,12 +54,12 @@ fn build_chain(n: u64) -> Vec<Record> {
 #[test]
 fn valid_chain_verifies() {
     let chain = build_chain(20);
-    assert_eq!(verify_chain(chain.into_iter()), Ok(()));
+    assert_eq!(verify_chain_from(chain.into_iter(), 0), Ok(()));
 }
 
 #[test]
 fn empty_chain_is_trivially_valid() {
-    assert_eq!(verify_chain(std::iter::empty()), Ok(()));
+    assert_eq!(verify_chain_from(std::iter::empty(), 0), Ok(()));
 }
 
 #[test]
@@ -73,14 +73,14 @@ fn test_chain_detects_tampering() {
         _ => unreachable!(),
     }
 
-    assert_eq!(verify_chain(chain.into_iter()), Err(ChainError::Diverged { seq: 7 }));
+    assert_eq!(verify_chain_from(chain.into_iter(), 0), Err(ChainError::Diverged { seq: 7 }));
 }
 
 #[test]
 fn corrupting_genesis_record_itself_is_detected() {
     let mut chain = build_chain(5);
     chain[0].header.prev_hash = [0xAB; 32];
-    assert_eq!(verify_chain(chain.into_iter()), Err(ChainError::Diverged { seq: 0 }));
+    assert_eq!(verify_chain_from(chain.into_iter(), 0), Err(ChainError::Diverged { seq: 0 }));
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn missing_record_is_reported_as_non_sequential() {
     let mut chain = build_chain(5);
     chain.remove(2);
     assert_eq!(
-        verify_chain(chain.into_iter()),
+        verify_chain_from(chain.into_iter(), 0),
         Err(ChainError::NonSequential { expected: 2, found: 3 })
     );
 }

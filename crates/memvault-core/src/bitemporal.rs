@@ -45,27 +45,12 @@ pub struct AsOfFact {
     pub pinned: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum AsOfError {
-    Ledger(LedgerError),
+    #[error(transparent)]
+    Ledger(#[from] LedgerError),
+    #[error(transparent)]
     Decrypt(DecryptError),
-}
-
-impl std::fmt::Display for AsOfError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AsOfError::Ledger(e) => write!(f, "{e}"),
-            AsOfError::Decrypt(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for AsOfError {}
-
-impl From<LedgerError> for AsOfError {
-    fn from(e: LedgerError) -> Self {
-        AsOfError::Ledger(e)
-    }
 }
 
 /// Reconstructs the facts true at `query`'s bitemporal coordinates by
@@ -133,36 +118,23 @@ mod tests {
     use crate::crypto::Keyring;
     use crate::ledger::Ledger;
     use crate::record::{ModelFingerprint, SourceRef};
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use crate::test_support::tmp;
+    use tempfile::TempDir;
 
-    fn tmp(tag: &str) -> std::path::PathBuf {
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!("memvault-bitemporal-test-{tag}-{}-{n}", std::process::id()))
-    }
-
+    /// `dir` is last to drop, so both stores close before it is removed.
     struct Harness {
         ledger: Ledger,
         keyring: Keyring,
-        ledger_path: std::path::PathBuf,
-        keyring_path: std::path::PathBuf,
+        #[allow(dead_code)]
+        dir: TempDir,
     }
 
-    impl Drop for Harness {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_file(&self.ledger_path);
-            let _ = std::fs::remove_file(&self.keyring_path);
-        }
-    }
-
-    fn harness(tag: &str) -> Harness {
-        let ledger_path = tmp(&format!("{tag}-ledger.redb"));
-        let keyring_path = tmp(&format!("{tag}-keys.redb"));
+    fn harness() -> Harness {
+        let dir = tmp();
         Harness {
-            ledger: Ledger::open(&ledger_path).unwrap(),
-            keyring: Keyring::open(&keyring_path).unwrap(),
-            ledger_path,
-            keyring_path,
+            ledger: Ledger::open(&dir.path().join("ledger.redb")).unwrap(),
+            keyring: Keyring::open(&dir.path().join("keys.redb")).unwrap(),
+            dir,
         }
     }
 
@@ -193,7 +165,7 @@ mod tests {
     /// questions, three distinct correct answers.
     #[test]
     fn test_three_bitemporal_questions_differ() {
-        let mut h = harness("three-questions");
+        let mut h = harness();
         let t0 = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
         let t1 = t0 + chrono::Duration::days(10); // superseding write, both valid_from and recorded_at
         let t2 = t0 + chrono::Duration::days(20); // "now": after the correction is known
@@ -229,7 +201,7 @@ mod tests {
 
     #[test]
     fn erased_fact_is_absent_even_within_its_valid_window() {
-        let mut h = harness("erased");
+        let mut h = harness();
         let t0 = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
         let fact_id = write(&mut h, None, "secret", t0, t0);
         h.keyring.destroy_key(fact_id).unwrap();

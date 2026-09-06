@@ -9,12 +9,10 @@ attached, rather than a per-question haystack.
     python benchmarks/locomo.py locomo10.json --out retrievals.jsonl
 """
 
-import argparse
 import json
 import re
-import sys
 
-from memvault_bench import Store, Turn, parse_timestamp, summarize
+from memvault_bench import Turn, parse_args, parse_timestamp, report, run
 
 _SESSION = re.compile(r"^session_(\d+)$")
 
@@ -57,63 +55,40 @@ def turns_for(conversation):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("dataset", help="Path to locomo10.json")
-    ap.add_argument("--out", default="locomo_retrievals.jsonl")
-    ap.add_argument("--k", type=int, default=10)
-    ap.add_argument("--max-tokens", type=int, default=2048)
-    ap.add_argument("--limit", type=int, help="Only run the first N samples (smoke test)")
-    ap.add_argument("--model", default="claude-opus-5", help="Model whose input price prices the context")
-    args = ap.parse_args()
-
+    args = parse_args(__doc__, "Path to locomo10.json", "locomo_retrievals.jsonl")
     samples = load(args.dataset)
     if args.limit:
         samples = samples[: args.limit]
 
-    costs = []
-    questions = 0
-    with open(args.out, "w", encoding="utf-8") as out:
-        for n, sample in enumerate(samples, 1):
-            # One store per sample, not per question: every question in a
-            # sample asks about the same conversation, so they share a
-            # haystack and re-ingesting it per question would only be slower.
-            store = Store()
-            try:
-                store.ingest(turns_for(sample["conversation"]))
-                for qa in sample["qa"]:
-                    question = qa.get("question")
-                    if not question:
-                        continue
-                    context, cost = store.retrieve(question, k=args.k, max_tokens=args.max_tokens)
-                    costs.append(cost)
-                    questions += 1
-                    out.write(
-                        json.dumps(
-                            {
-                                "sample_id": sample.get("sample_id", f"sample_{n}"),
-                                "question": question,
-                                "category": qa.get("category"),
-                                "answer": qa.get("answer"),
-                                "evidence": qa.get("evidence"),
-                                "retrieved_context": context,
-                                "retrieval_cost": vars(cost),
-                            }
-                        )
-                        + "\n"
-                    )
-            finally:
-                store.close()
-            print(f"\r{n}/{len(samples)} samples, {questions} questions", end="", file=sys.stderr, flush=True)
+    def unit(numbered):
+        # One store per sample, not per question: every question in a sample
+        # asks about the same conversation, so they share a haystack and
+        # re-ingesting it per question would only be slower.
+        n, sample = numbered
+        asks = [
+            (
+                qa["question"],
+                {
+                    "sample_id": sample.get("sample_id", f"sample_{n}"),
+                    "category": qa.get("category"),
+                    "answer": qa.get("answer"),
+                    "evidence": qa.get("evidence"),
+                },
+            )
+            for qa in sample["qa"]
+            if qa.get("question")
+        ]
+        return turns_for(sample["conversation"]), asks
 
-    print(file=sys.stderr)
-    summary = summarize(costs, model=args.model)
-    summary["dataset"] = args.dataset
-    summary["samples"] = len(samples)
-    summary["questions"] = questions
-    summary["k"] = args.k
-    summary["max_tokens"] = args.max_tokens
-    print(json.dumps(summary, indent=2))
-    print(f"\nwrote {args.out} -- feed it to LOCOMO's generation + evaluation scripts", file=sys.stderr)
+    costs, questions = run(
+        list(enumerate(samples, 1)), unit, args, lambda n, total, q: f"{n}/{total} samples, {q} questions"
+    )
+    report(
+        costs,
+        args,
+        {"dataset": args.dataset, "samples": len(samples), "questions": questions},
+        "LOCOMO's generation + evaluation scripts",
+    )
 
 
 if __name__ == "__main__":

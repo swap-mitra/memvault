@@ -28,6 +28,7 @@ grpc = ["dep:prost", "dep:tonic", "dep:tonic-prost", "dep:protoc-bin-vendored", 
 
 [dev-dependencies]
 serde_json = "1.0.151"
+tempfile = "3.27.0"
 # For the grpc smoke test only: lets tonic serve on an OS-assigned port
 # instead of racing for a fixed one.
 tokio = { version = "1.53.1", features = ["net"] }

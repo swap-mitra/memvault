@@ -14,12 +14,15 @@ use std::time::{Duration, Instant};
 
 use clap::Parser;
 use memvault_core::{
-    default_fingerprint, placeholder_embedding, recover, search, write_fact, Indexes, KeywordIndex,
-    Keyring, Ledger, NamespaceId, Query, RecoveryConfig, SourceRef, VectorIndex, WriteInput,
-    PLACEHOLDER_EMBEDDING_NAME,
+    default_fingerprint, open_stores, placeholder_embedding, recover, search, write_fact,
+    NamespaceId, Query, RecoveryConfig, SourceRef, WriteInput, PLACEHOLDER_EMBEDDING_NAME,
 };
 
 const NAMESPACE: &str = "bench";
+
+/// Shared by the corpus and the queries run against it: a query only ever
+/// hits because it names a subject the corpus used.
+const SUBJECTS: [&str; 8] = ["deploy script", "staging database", "api gateway", "billing job", "search index", "auth service", "cache layer", "metrics pipeline"];
 
 #[derive(Parser)]
 #[command(name = "memvault-bench", about = "Latency, verification, and rebuild benchmarks under the product doc §7 protocol")]
@@ -86,7 +89,6 @@ fn detected_hardware() -> String {
 /// enough repetition that queries hit. Deterministic, so two runs on the
 /// same machine are comparable.
 fn corpus_text(i: u64) -> String {
-    const SUBJECTS: [&str; 8] = ["deploy script", "staging database", "api gateway", "billing job", "search index", "auth service", "cache layer", "metrics pipeline"];
     const PREDICATES: [&str; 6] = ["lives in", "was migrated to", "is owned by", "depends on", "was rewritten in", "is monitored by"];
     const OBJECTS: [&str; 8] = ["ops/deploy.sh", "postgres 16", "the platform team", "the shared queue", "rust", "the on-call rotation", "redis", "a nightly cron"];
     format!(
@@ -98,17 +100,7 @@ fn corpus_text(i: u64) -> String {
 }
 
 fn query_text(i: u64) -> String {
-    const SUBJECTS: [&str; 8] = ["deploy script", "staging database", "api gateway", "billing job", "search index", "auth service", "cache layer", "metrics pipeline"];
     SUBJECTS[(i % 8) as usize].to_string()
-}
-
-fn open(data_dir: &std::path::Path) -> Result<(Ledger, Keyring, Indexes), Box<dyn std::error::Error>> {
-    std::fs::create_dir_all(data_dir)?;
-    let ledger = Ledger::open(&data_dir.join("ledger.redb"))?;
-    let keyring = Keyring::open(&data_dir.join("keys.redb"))?;
-    let vector = VectorIndex::open_or_create(&data_dir.join("vectors.usearch"), &default_fingerprint())?;
-    let keyword = KeywordIndex::open_or_create(&data_dir.join("keyword"))?;
-    Ok((ledger, keyring, Indexes { vector, keyword }))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -120,7 +112,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let owns_scratch = args.data_dir.is_none();
 
     let fingerprint = default_fingerprint();
-    let (ledger, mut keyring, mut indexes) = open(&scratch)?;
+    let (ledger, mut keyring, mut indexes) = open_stores(&scratch)?;
 
     // --- corpus ---------------------------------------------------------
     let ingest_start = Instant::now();
@@ -158,58 +150,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  ingest               {:.3} s for {} records", ingest.as_secs_f64(), args.corpus_size);
 
     // --- retrieval latency ----------------------------------------------
-    // Index-only: the embedding is computed outside the timed region, so
-    // this measures fusion over a warm index and nothing else.
-    let mut index_only = Vec::with_capacity(args.queries as usize);
-    for i in 0..args.queries {
-        let text = query_text(i);
-        let embedding = placeholder_embedding(&text);
-        let start = Instant::now();
-        search(
-            &ledger,
-            &indexes,
-            Query {
-                text: Some(text),
-                embedding: Some(embedding),
-                embedding_model: None,
-                namespace: NamespaceId(NAMESPACE.into()),
-                as_of: None,
-                k: args.k,
-                max_tokens: args.max_tokens,
-            },
-        )?;
-        index_only.push(start.elapsed());
-    }
+    // The two figures differ in one thing: whether embedding the query text
+    // happens inside the timed region or before it.
+    let timed = |embed_inside: bool| -> Result<Vec<Duration>, Box<dyn std::error::Error>> {
+        let mut samples = Vec::with_capacity(args.queries as usize);
+        for i in 0..args.queries {
+            let text = query_text(i);
+            let precomputed = (!embed_inside).then(|| placeholder_embedding(&text));
+            let start = Instant::now();
+            let embedding = precomputed.unwrap_or_else(|| placeholder_embedding(&text));
+            search(
+                &ledger,
+                &indexes,
+                Query {
+                    text: Some(text),
+                    embedding: Some(embedding),
+                    embedding_model: None,
+                    namespace: NamespaceId(NAMESPACE.into()),
+                    as_of: None,
+                    k: args.k,
+                    max_tokens: args.max_tokens,
+                },
+            )?;
+            samples.push(start.elapsed());
+        }
+        Ok(samples)
+    };
+
     print_latency(
         "retrieval latency, index-only",
         "ANN + BM25 + RRF + decay + budget over a warm index; embedding computed outside the timed region",
-        index_only,
+        timed(false)?,
     );
-
-    let mut end_to_end = Vec::with_capacity(args.queries as usize);
-    for i in 0..args.queries {
-        let text = query_text(i);
-        let start = Instant::now();
-        let embedding = placeholder_embedding(&text);
-        search(
-            &ledger,
-            &indexes,
-            Query {
-                text: Some(text),
-                embedding: Some(embedding),
-                embedding_model: None,
-                namespace: NamespaceId(NAMESPACE.into()),
-                as_of: None,
-                k: args.k,
-                max_tokens: args.max_tokens,
-            },
-        )?;
-        end_to_end.push(start.elapsed());
-    }
     print_latency(
         "retrieval latency, end-to-end",
         "index-only plus embedding the query text with the model named above",
-        end_to_end,
+        timed(true)?,
     );
 
     // --- verification throughput ----------------------------------------
