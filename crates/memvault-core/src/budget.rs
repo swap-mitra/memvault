@@ -8,14 +8,10 @@ use uuid::Uuid;
 
 use crate::decay::ScoredCandidate;
 
+/// A candidate and what it costs. Which of the two returned lists it lands
+/// in is what says whether it was admitted.
 #[derive(Debug, Clone, PartialEq)]
-pub struct PackedCandidate {
-    pub candidate: ScoredCandidate,
-    pub token_cost: u32,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SkippedCandidate {
+pub struct PricedCandidate {
     pub candidate: ScoredCandidate,
     pub token_cost: u32,
 }
@@ -24,7 +20,7 @@ pub fn pack_to_budget(
     mut candidates: Vec<ScoredCandidate>,
     max_tokens: u32,
     token_cost: impl Fn(Uuid) -> u32,
-) -> (Vec<PackedCandidate>, Vec<SkippedCandidate>) {
+) -> (Vec<PricedCandidate>, Vec<PricedCandidate>) {
     candidates.sort_by(|a, b| b.final_score.partial_cmp(&a.final_score).expect("final_score is never NaN"));
 
     let mut remaining = max_tokens;
@@ -35,9 +31,9 @@ pub fn pack_to_budget(
         let cost = token_cost(candidate.fact_id);
         if cost <= remaining {
             remaining -= cost;
-            packed.push(PackedCandidate { candidate, token_cost: cost });
+            packed.push(PricedCandidate { candidate, token_cost: cost });
         } else {
-            skipped.push(SkippedCandidate { candidate, token_cost: cost });
+            skipped.push(PricedCandidate { candidate, token_cost: cost });
         }
     }
 
