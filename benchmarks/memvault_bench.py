@@ -13,8 +13,10 @@ Requires the `memvault` wheel:
     pip install --find-links target/wheels memvault
 """
 
-import re
+import argparse
+import json
 import shutil
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -116,17 +118,16 @@ class Store:
 
 # Each benchmark stamps its dates differently and neither is ISO. Parsing is
 # not optional: valid_from drives decay and every temporal-reasoning
-# question, so a silently-wrong date quietly changes the score.
-_LONGMEMEVAL_DATE = re.compile(r"^(\d{4})/(\d{2})/(\d{2})(?:\s+\([A-Za-z]{3}\))?(?:\s+(\d{2}):(\d{2}))?$")
-_LOCOMO_DATE = re.compile(
-    r"^(\d{1,2}):(\d{2})\s*(am|pm)\s+on\s+(\d{1,2})\s+([A-Za-z]+),?\s+(\d{4})$", re.IGNORECASE
+# question, so a silently-wrong date quietly changes the score. `%a` and `%B`
+# read English names, which is what both datasets ship and what the C locale
+# Python starts in expects -- neither script calls setlocale.
+_FORMATS = (
+    "%Y/%m/%d (%a) %H:%M",  # LongMemEval
+    "%Y/%m/%d %H:%M",
+    "%Y/%m/%d",
+    "%I:%M %p on %d %B, %Y",  # LOCOMO
+    "%I:%M %p on %d %B %Y",
 )
-_MONTHS = {
-    m: i + 1
-    for i, m in enumerate(
-        ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
-    )
-}
 
 
 def parse_timestamp(raw):
@@ -136,21 +137,11 @@ def parse_timestamp(raw):
     fabricated date would silently corrupt every temporal question in the run.
     """
     raw = raw.strip()
-
-    m = _LONGMEMEVAL_DATE.match(raw)
-    if m:
-        year, month, day, hour, minute = m.groups()
-        return datetime(int(year), int(month), int(day), int(hour or 0), int(minute or 0), tzinfo=timezone.utc)
-
-    m = _LOCOMO_DATE.match(raw)
-    if m:
-        hour, minute, meridiem, day, month_name, year = m.groups()
-        hour = int(hour) % 12 + (12 if meridiem.lower() == "pm" else 0)
-        month = _MONTHS.get(month_name.lower())
-        if month is None:
-            raise ValueError(f"unknown month in timestamp: {raw!r}")
-        return datetime(int(year), month, int(day), hour, int(minute), tzinfo=timezone.utc)
-
+    for fmt in _FORMATS:
+        try:
+            return datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
     raise ValueError(f"unrecognized timestamp format: {raw!r}")
 
 
