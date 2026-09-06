@@ -21,9 +21,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use memvault_core::{
-    default_fingerprint, erase, explain, memory_as_of, recover, supersede_fact, write_fact,
-    AsOfQuery, Explanation, Indexes, KeywordIndex, Keyring, Ledger, NamespaceId, Query,
-    RecoveryConfig, SourceRef, VectorIndex, WriteInput,
+    default_fingerprint, erase, explain, memory_as_of, open_stores, recover, supersede_fact,
+    write_fact, AsOfQuery, Explanation, Indexes, Keyring, Ledger, NamespaceId, Query,
+    RecoveryConfig, SourceRef, WriteInput,
 };
 
 fn default_k() -> usize {
@@ -132,12 +132,7 @@ struct Stores {
 
 impl Stores {
     fn open(data_dir: &Path) -> Result<Self, Box<dyn std::error::Error>> {
-        std::fs::create_dir_all(data_dir)?;
-        let ledger = Ledger::open(&data_dir.join("ledger.redb"))?;
-        let keyring = Keyring::open(&data_dir.join("keys.redb"))?;
-        let vector = VectorIndex::open_or_create(&data_dir.join("vectors.usearch"), &default_fingerprint())?;
-        let keyword = KeywordIndex::open_or_create(&data_dir.join("keyword"))?;
-        let mut indexes = Indexes { vector, keyword };
+        let (ledger, keyring, mut indexes) = open_stores(data_dir)?;
 
         let report = recover(&ledger, &mut indexes, &keyring, &default_fingerprint(), RecoveryConfig { verify_chain: true })?;
         eprintln!("memvault-server: recovery report: {report:?}");

@@ -18,9 +18,10 @@ use pyo3::prelude::*;
 use uuid::Uuid;
 
 use memvault_core::{
-    default_fingerprint, erase, explain as core_explain, memory_as_of, recover, search as core_search,
-    supersede_fact, write_fact, AsOfQuery, Explanation as CoreExplanation, Indexes, KeywordIndex,
-    Keyring, Ledger, NamespaceId, Query, RecoveryConfig, SourceRef, VectorIndex, WriteInput,
+    default_fingerprint, erase, explain as core_explain, memory_as_of, open_stores, recover,
+    search as core_search, supersede_fact, write_fact, AsOfQuery,
+    Explanation as CoreExplanation, Indexes, Keyring, Ledger, NamespaceId, Query, RecoveryConfig,
+    SourceRef, WriteInput,
 };
 
 create_exception!(
@@ -137,14 +138,7 @@ impl PyMemVault {
     #[new]
     fn new(py: Python<'_>, data_dir: PathBuf) -> PyResult<Self> {
         py.detach(|| {
-            std::fs::create_dir_all(&data_dir).map_err(engine_err)?;
-            let ledger = Ledger::open(&data_dir.join("ledger.redb")).map_err(engine_err)?;
-            let keyring = Keyring::open(&data_dir.join("keys.redb")).map_err(engine_err)?;
-            let vector =
-                VectorIndex::open_or_create(&data_dir.join("vectors.usearch"), &default_fingerprint())
-                    .map_err(engine_err)?;
-            let keyword = KeywordIndex::open_or_create(&data_dir.join("keyword")).map_err(engine_err)?;
-            let mut indexes = Indexes { vector, keyword };
+            let (ledger, keyring, mut indexes) = open_stores(&data_dir).map_err(engine_err)?;
 
             recover(
                 &ledger,

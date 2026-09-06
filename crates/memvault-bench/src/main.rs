@@ -14,9 +14,8 @@ use std::time::{Duration, Instant};
 
 use clap::Parser;
 use memvault_core::{
-    default_fingerprint, placeholder_embedding, recover, search, write_fact, Indexes, KeywordIndex,
-    Keyring, Ledger, NamespaceId, Query, RecoveryConfig, SourceRef, VectorIndex, WriteInput,
-    PLACEHOLDER_EMBEDDING_NAME,
+    default_fingerprint, open_stores, placeholder_embedding, recover, search, write_fact,
+    NamespaceId, Query, RecoveryConfig, SourceRef, WriteInput, PLACEHOLDER_EMBEDDING_NAME,
 };
 
 const NAMESPACE: &str = "bench";
@@ -102,15 +101,6 @@ fn query_text(i: u64) -> String {
     SUBJECTS[(i % 8) as usize].to_string()
 }
 
-fn open(data_dir: &std::path::Path) -> Result<(Ledger, Keyring, Indexes), Box<dyn std::error::Error>> {
-    std::fs::create_dir_all(data_dir)?;
-    let ledger = Ledger::open(&data_dir.join("ledger.redb"))?;
-    let keyring = Keyring::open(&data_dir.join("keys.redb"))?;
-    let vector = VectorIndex::open_or_create(&data_dir.join("vectors.usearch"), &default_fingerprint())?;
-    let keyword = KeywordIndex::open_or_create(&data_dir.join("keyword"))?;
-    Ok((ledger, keyring, Indexes { vector, keyword }))
-}
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
@@ -120,7 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let owns_scratch = args.data_dir.is_none();
 
     let fingerprint = default_fingerprint();
-    let (ledger, mut keyring, mut indexes) = open(&scratch)?;
+    let (ledger, mut keyring, mut indexes) = open_stores(&scratch)?;
 
     // --- corpus ---------------------------------------------------------
     let ingest_start = Instant::now();

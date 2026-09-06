@@ -53,6 +53,21 @@ mod recovery_tests;
 #[cfg(test)]
 mod write_path_tests;
 
+/// Opens (creating if absent) the ledger, keyring and both indexes that make
+/// up a MemVault data directory. Every surface -- CLI, MCP server, FFI,
+/// benchmarks -- needs exactly these four over exactly this layout, and a
+/// second opinion about the file names would be a data-corrupting one.
+/// Recovery is the caller's next step, not this function's: the CLI defers
+/// it to an explicit `replay`, the servers run it at startup.
+pub fn open_stores(data_dir: &std::path::Path) -> Result<(Ledger, Keyring, Indexes), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(data_dir)?;
+    let ledger = Ledger::open(&data_dir.join("ledger.redb"))?;
+    let keyring = Keyring::open(&data_dir.join("keys.redb"))?;
+    let vector = VectorIndex::open_or_create(&data_dir.join("vectors.usearch"), &default_fingerprint())?;
+    let keyword = KeywordIndex::open_or_create(&data_dir.join("keyword"))?;
+    Ok((ledger, keyring, Indexes { vector, keyword }))
+}
+
 pub use bitemporal::{memory_as_of, AsOfError, AsOfFact, AsOfQuery};
 pub use budget::{pack_to_budget, PricedCandidate};
 pub use chain::{record_hash, verify_chain_from, ChainError};
