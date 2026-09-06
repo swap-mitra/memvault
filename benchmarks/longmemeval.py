@@ -14,11 +14,9 @@ LongMemEval's generation script, then its evaluator, and publish the score
 next to the cost summary this prints.
 """
 
-import argparse
 import json
-import sys
 
-from memvault_bench import Store, Turn, parse_timestamp, summarize
+from memvault_bench import Turn, parse_args, parse_timestamp, report, run
 
 REQUIRED_FIELDS = ("question_id", "question", "haystack_sessions", "haystack_dates")
 
@@ -64,53 +62,21 @@ def turns_for(item):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("dataset", help="Path to longmemeval_s.json (or _m / _oracle)")
-    ap.add_argument("--out", default="longmemeval_retrievals.jsonl")
-    ap.add_argument("--k", type=int, default=10)
-    ap.add_argument("--max-tokens", type=int, default=2048)
-    ap.add_argument("--limit", type=int, help="Only run the first N questions (smoke test)")
-    ap.add_argument("--model", default="claude-opus-5", help="Model whose input price prices the context")
-    args = ap.parse_args()
-
+    args = parse_args(__doc__, "Path to longmemeval_s.json (or _m / _oracle)", "longmemeval_retrievals.jsonl")
     items = load(args.dataset)
     if args.limit:
         items = items[: args.limit]
 
-    costs = []
-    with open(args.out, "w", encoding="utf-8") as out:
-        for n, item in enumerate(items, 1):
-            store = Store()
-            try:
-                store.ingest(turns_for(item))
-                context, cost = store.retrieve(item["question"], k=args.k, max_tokens=args.max_tokens)
-            finally:
-                store.close()
-            costs.append(cost)
+    def unit(item):
+        row = {
+            "question_id": item["question_id"],
+            "question_type": item.get("question_type"),
+            "answer": item.get("answer"),
+        }
+        return turns_for(item), [(item["question"], row)]
 
-            out.write(
-                json.dumps(
-                    {
-                        "question_id": item["question_id"],
-                        "question": item["question"],
-                        "question_type": item.get("question_type"),
-                        "answer": item.get("answer"),
-                        "retrieved_context": context,
-                        "retrieval_cost": vars(cost),
-                    }
-                )
-                + "\n"
-            )
-            print(f"\r{n}/{len(items)} questions", end="", file=sys.stderr, flush=True)
-
-    print(file=sys.stderr)
-    summary = summarize(costs, model=args.model)
-    summary["dataset"] = args.dataset
-    summary["questions"] = len(items)
-    summary["k"] = args.k
-    summary["max_tokens"] = args.max_tokens
-    print(json.dumps(summary, indent=2))
-    print(f"\nwrote {args.out} -- feed it to LongMemEval's generation + evaluation scripts", file=sys.stderr)
+    costs, questions = run(items, unit, args, lambda n, total, _q: f"{n}/{total} questions")
+    report(costs, args, {"dataset": args.dataset, "questions": questions}, "LongMemEval's generation + evaluation scripts")
 
 
 if __name__ == "__main__":

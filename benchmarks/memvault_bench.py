@@ -167,6 +167,60 @@ def summarize(costs, model="claude-opus-5"):
     }
 
 
+def parse_args(description, dataset_help, default_out):
+    """The argument set both harnesses take. They differ only in wording."""
+    ap = argparse.ArgumentParser(description=description, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("dataset", help=dataset_help)
+    ap.add_argument("--out", default=default_out)
+    ap.add_argument("--k", type=int, default=10)
+    ap.add_argument("--max-tokens", type=int, default=2048)
+    ap.add_argument("--limit", type=int, help="Only run the first N samples (smoke test)")
+    ap.add_argument("--model", default="claude-opus-5", help="Model whose input price prices the context")
+    return ap.parse_args()
+
+
+def run(items, unit_fn, args, progress):
+    """Retrieve for every question and write one JSONL row each.
+
+    `unit_fn(item)` returns (turns, [(question, row_fields), ...]): the turns
+    sharing one haystack, and the questions asked against it. One Store per
+    item, for the reason in `Store`'s own docstring.
+
+    `progress(n, total, questions)` renders the stderr progress line, which
+    counts different things in each benchmark.
+    """
+    costs = []
+    questions = 0
+    with open(args.out, "w", encoding="utf-8") as out:
+        for n, item in enumerate(items, 1):
+            store = Store()
+            try:
+                turns, asks = unit_fn(item)
+                store.ingest(turns)
+                for question, row in asks:
+                    context, cost = store.retrieve(question, k=args.k, max_tokens=args.max_tokens)
+                    costs.append(cost)
+                    questions += 1
+                    row = {**row, "question": question, "retrieved_context": context, "retrieval_cost": vars(cost)}
+                    out.write(json.dumps(row) + "\n")
+            finally:
+                store.close()
+            print(f"\r{progress(n, len(items), questions)}", end="", file=sys.stderr, flush=True)
+
+    print(file=sys.stderr)
+    return costs, questions
+
+
+def report(costs, args, extra, scripts):
+    """Print the cost summary the product doc requires, and where to go next."""
+    summary = summarize(costs, model=args.model)
+    summary.update(extra)
+    summary["k"] = args.k
+    summary["max_tokens"] = args.max_tokens
+    print(json.dumps(summary, indent=2))
+    print(f"\nwrote {args.out} -- feed it to {scripts}", file=sys.stderr)
+
+
 def _demo():
     """Self-check: the pieces with a branch or a parser in them."""
     assert parse_timestamp("2023/05/20 (Sat) 02:33") == datetime(2023, 5, 20, 2, 33, tzinfo=timezone.utc)
