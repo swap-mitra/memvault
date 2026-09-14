@@ -16,12 +16,19 @@ That split is also why nothing here calls an LLM and why the project takes
 no dependency on one. MemVault never calls a model (product doc P5); a
 harness that did would be measuring something the engine doesn't do.
 
+Embeddings are the exception, and deliberately so: retrieval quality is a
+property of the embedding model as much as of the engine, and MemVault has
+no model of its own. Without one the harness measures keyword (BM25)
+retrieval only, which is a real configuration but not the one a quality
+number should be quoted for. Pass `--embed-url` and `--embed-model` to use
+any OpenAI-compatible `/embeddings` endpoint, the same way the server's
+`MEMVAULT_EMBED_URL` does; the standard library makes the calls, so this
+adds no dependency, and the summary names the model so a number never
+travels without it.
+
 ## Setup
 
-```sh
-maturin build -m crates/memvault-ffi/Cargo.toml --release
-pip install --find-links target/wheels memvault
-```
+Install the `memvault` wheel, as described under Install in the main README.
 
 Then get the datasets from their own projects: LongMemEval publishes
 `longmemeval_s.json` / `_m` / `_oracle`, LOCOMO publishes `locomo10.json`.
@@ -30,9 +37,15 @@ Neither is redistributed here.
 ## Running
 
 ```sh
-python benchmarks/longmemeval.py longmemeval_s.json --out lme_retrievals.jsonl
-python benchmarks/locomo.py       locomo10.json      --out locomo_retrievals.jsonl
+python benchmarks/longmemeval.py longmemeval_s.json --out lme_retrievals.jsonl \
+  --embed-url http://localhost:11434/v1 --embed-model nomic-embed-text
+python benchmarks/locomo.py       locomo10.json      --out locomo_retrievals.jsonl \
+  --embed-url http://localhost:11434/v1 --embed-model nomic-embed-text
 ```
+
+`--embed-api-key` (or `MEMVAULT_EMBED_API_KEY` in the environment) is the
+bearer token for providers that want one. Leave both embed flags off for a
+keyword-only run.
 
 Each writes one JSON object per question — the retrieved context plus that
 retrieval's cost — and prints a summary to stdout. Feed the JSONL to the
@@ -59,9 +72,21 @@ Two caveats travel with those numbers, and both are stated in the output
 itself rather than left to a footnote:
 
 **`token_cost_basis`.** Token counts come from MemVault's own estimate
-(ciphertext bytes / 4), not a tokenizer. It is an approximation for English
-prose and will drift on code or other languages. Real tokenizer counts need
-a tokenizer dependency the engine deliberately doesn't carry.
+(ciphertext bytes / 4) unless the wheel was built with `--features
+tokenizer`, in which case they are cl100k_base counts. The estimate is fine
+for English prose and drifts on code or other languages.
+
+**`embedding_model`.** Which model produced the vectors, or the statement
+that none did. A quality score without this line is not comparable to
+anything.
+
+## Published numbers
+
+None yet. The harnesses run in CI against miniature fixtures with keyword
+retrieval only, which proves the pipeline and nothing about quality. A
+publishable figure needs the real datasets, a named embedding model, the
+benchmark's own generator and grader, and the cost summary alongside; when
+that run happens its protocol and result belong here, together.
 
 **Input cost only.** A memory layer decides what goes into the prompt and
 nothing about what comes out, so input cost is the figure it is accountable

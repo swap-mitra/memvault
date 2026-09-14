@@ -60,6 +60,10 @@ jobs:
           path: dist
       - run: pip install --no-index --find-links dist memvault
       - run: python crates/memvault-ffi/tests/test_ffi_write_search_roundtrip.py
+      # The benchmark harnesses drive the same wheel; without this they rot
+      # silently the next time the Python API moves.
+      - run: python benchmarks/memvault_bench.py
+      - run: python benchmarks/test_harnesses.py
 
   attach:
     # The wheels ride along on the GitHub release next to the binaries, so

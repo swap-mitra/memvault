@@ -483,7 +483,7 @@ Stated plainly, because each one will otherwise look like a bug.
 | **Namespaces isolate results, but share one candidate pool** | A search never returns another namespace's facts. It does draw candidates from indexes shared across the whole data directory and filter afterwards, so a namespace holding far more facts than its neighbours can crowd them out of that pool and cost them recall. Nothing leaks either way; a very lopsided multi-tenant directory is still better off with a `--data-dir` per tenant. |
 | **Token counts are estimates by default** | Ciphertext bytes / 4, not a tokenizer. Close enough for budgeting English prose, drifting on code. Build with `--features tokenizer` and the `tokens` column becomes a real cl100k_base count of the decrypted content; the vocabulary is compiled in and no model runs. |
 | **Decay measures from a fact's own start** | Not from last access — so retrieval does not yet reinforce a fact against decay. |
-| **Every search appends to the ledger** | The Retrieval record that makes `explain` possible is a ledger write, so the chain grows with reads as well as writes, and `verify` and `explain` walk all of it. There is no compaction or checkpointing yet. An agent that searches on every turn will notice `verify` slowing over months, not days; `memvault verify --from <seq>` bounds it in the meantime. |
+| **No retrieval-quality numbers yet** | The LongMemEval and LOCOMO harnesses run, with a real embedding model if you give them one, but nobody has published a scored run. Until then the only figures here are latency and cost; see [Evals](#evals--longmemeval-and-locomo). |
 
 ---
 
@@ -575,10 +575,19 @@ out in the shape each benchmark's own scripts consume. Generation and judging
 stay with the benchmark, which is what "run unmodified" means.
 
 ```sh
-# the Python bindings, installed as under Install
-python benchmarks/longmemeval.py longmemeval_s.json --out lme_retrievals.jsonl
-python benchmarks/locomo.py       locomo10.json      --out locomo_retrievals.jsonl
+# the Python bindings, installed as under Install; the embed flags take any
+# OpenAI-compatible endpoint, here Ollama, and are what makes a quality
+# number meaningful -- without them retrieval is keyword-only
+python benchmarks/longmemeval.py longmemeval_s.json --out lme_retrievals.jsonl \
+  --embed-url http://localhost:11434/v1 --embed-model nomic-embed-text
+python benchmarks/locomo.py       locomo10.json      --out locomo_retrievals.jsonl \
+  --embed-url http://localhost:11434/v1 --embed-model nomic-embed-text
 ```
+
+No scored run has been published yet. A publishable figure needs the real
+datasets, a named embedding model, the benchmark's own generator and grader,
+and the cost summary alongside it; the harness prints the model name into
+that summary so the number can never travel without it.
 
 Each prints a summary that reports accuracy's *cost* next to it:
 
@@ -588,7 +597,8 @@ Each prints a summary that reports accuracy's *cost* next to it:
 | `injected_per_call_mean` vs `considered_per_call_mean` | How much of what was found actually fit. |
 | `cut_by_budget_total` / `cut_by_k_total` / `filtered_by_time_total` | Why the rest didn't. |
 | `input_cost_per_turn_usd` | The retrieved context priced at the input rate of `--model` (default `claude-opus-5`). |
-| `token_cost_basis` | Stated in the output itself: MemVault's estimate, not a tokenizer. |
+| `embedding_model` | Which model produced the vectors, or that none did (keyword-only). |
+| `token_cost_basis` | Stated in the output itself: MemVault's estimate, unless the wheel was built with `--features tokenizer`. |
 
 > [!NOTE]
 > Neither dataset is redistributed here — get `longmemeval_s.json` and

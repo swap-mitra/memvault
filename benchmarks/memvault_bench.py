@@ -7,17 +7,22 @@ this module ingests turns, retrieves for a question, and reports what the
 retrieval cost. Generation and grading stay with each benchmark's own
 scripts, which is what "run unmodified" means (plan tasks P2-3/P2-4).
 
-Requires the `memvault` wheel:
+Requires the `memvault` wheel (see the README's Install section).
 
-    maturin build -m crates/memvault-ffi/Cargo.toml --release
-    pip install --find-links target/wheels memvault
+Retrieval quality depends on the embedding model, and MemVault has none of
+its own, so without `--embed-url`/`--embed-model` the harness runs keyword
+(BM25) retrieval only. Any OpenAI-compatible `/embeddings` endpoint works,
+the same way the server's MEMVAULT_EMBED_URL does; the summary names the
+model so a number never travels without it.
 """
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import tempfile
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -35,6 +40,39 @@ INPUT_PRICE_PER_MTOK = {
 }
 
 NAMESPACE = "bench"
+
+
+class Embedder:
+    """An OpenAI-compatible `/embeddings` endpoint, called with the standard
+    library so the harness adds no dependency. Ollama, OpenAI and Voyage all
+    speak this shape."""
+
+    def __init__(self, url, model, api_key=None):
+        self.endpoint = url.rstrip("/") + "/embeddings"
+        self.model = model
+        self.api_key = api_key
+
+    def embed(self, text):
+        body = json.dumps({"model": self.model, "input": text}).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        request = urllib.request.Request(self.endpoint, data=body, headers=headers, method="POST")
+        with urllib.request.urlopen(request, timeout=60) as response:
+            payload = json.load(response)
+        embedding = payload["data"][0]["embedding"]
+        if not embedding:
+            raise RuntimeError(f"{self.endpoint} returned an empty embedding for model {self.model!r}")
+        return embedding
+
+
+def embedder_from(args):
+    """The provider the flags describe, or None for keyword-only retrieval."""
+    if bool(args.embed_url) != bool(args.embed_model):
+        sys.exit("--embed-url and --embed-model must be given together")
+    if not args.embed_url:
+        return None
+    return Embedder(args.embed_url, args.embed_model, args.embed_api_key)
 
 
 @dataclass
@@ -75,41 +113,48 @@ class Store:
     filter before fusion rather than after.
     """
 
+    embedder: Embedder = None
     data_dir: str = field(default_factory=lambda: tempfile.mkdtemp(prefix="memvault-bench-"))
     _mv: memvault.MemVault = field(init=False)
-    _text_by_fact: dict = field(default_factory=dict, init=False)
 
     def __post_init__(self):
-        self._mv = memvault.MemVault(self.data_dir)
+        if self.embedder is None:
+            self._mv = memvault.MemVault(self.data_dir)
+        else:
+            # The directory's width is fixed at creation, so learn it from
+            # the model rather than trusting a flag.
+            width = len(self.embedder.embed("memvault embedding width probe"))
+            self._mv = memvault.MemVault(self.data_dir, embedding_dim=width)
+
+    def _embed(self, text):
+        return self.embedder.embed(text) if self.embedder else None
 
     def ingest(self, turns):
         for turn in turns:
-            fact_id = self._mv.write(
+            self._mv.write(
                 NAMESPACE,
                 turn.text,
+                embedding=self._embed(turn.text),
                 valid_from=turn.when.isoformat(),
                 source=turn.session_id or None,
             )
-            self._text_by_fact[fact_id] = turn.text
 
     def retrieve(self, question, k=10, max_tokens=2048):
         """Return (context_strings, RetrievalCost) for one question."""
-        _, explanations = self._mv.search(NAMESPACE, question, k=k, max_tokens=max_tokens)
+        result = self._mv.search(NAMESPACE, question, embedding=self._embed(question), k=k, max_tokens=max_tokens)
 
-        cost = RetrievalCost(considered=len(explanations))
-        context = []
-        for e in explanations:
+        cost = RetrievalCost(considered=len(result.candidates))
+        for e in result.candidates:
             if e.outcome == "Injected":
                 cost.injected += 1
                 cost.tokens += e.token_cost
-                context.append(self._text_by_fact[e.fact_id])
             elif e.outcome == "CutByBudget":
                 cost.cut_by_budget += 1
             elif e.outcome == "CutByK":
                 cost.cut_by_k += 1
             elif e.outcome == "FilteredByTime":
                 cost.filtered_by_time += 1
-        return context, cost
+        return [f.content for f in result.injected], cost
 
     def close(self):
         del self._mv
@@ -145,7 +190,7 @@ def parse_timestamp(raw):
     raise ValueError(f"unrecognized timestamp format: {raw!r}")
 
 
-def summarize(costs, model="claude-opus-5"):
+def summarize(costs, model="claude-opus-5", embedding_model=None):
     """Aggregate per-retrieval costs into the figures product doc §7 requires."""
     if not costs:
         return {}
@@ -163,7 +208,8 @@ def summarize(costs, model="claude-opus-5"):
         "input_cost_per_turn_usd": total_tokens / n / 1_000_000 * INPUT_PRICE_PER_MTOK[model],
         "input_price_model": model,
         "input_price_per_mtok_usd": INPUT_PRICE_PER_MTOK[model],
-        "token_cost_basis": "memvault Explanation.token_cost (ciphertext bytes / 4), not a real tokenizer",
+        "embedding_model": embedding_model or "none: keyword-only (BM25) retrieval",
+        "token_cost_basis": "memvault Explanation.token_cost: ciphertext bytes / 4 unless the wheel was built with --features tokenizer",
     }
 
 
@@ -176,6 +222,13 @@ def parse_args(description, dataset_help, default_out):
     ap.add_argument("--max-tokens", type=int, default=2048)
     ap.add_argument("--limit", type=int, help="Only run the first N samples (smoke test)")
     ap.add_argument("--model", default="claude-opus-5", help="Model whose input price prices the context")
+    ap.add_argument("--embed-url", help="OpenAI-compatible embeddings base URL, e.g. http://localhost:11434/v1")
+    ap.add_argument("--embed-model", help="Embedding model name at that URL, e.g. nomic-embed-text")
+    ap.add_argument(
+        "--embed-api-key",
+        default=os.environ.get("MEMVAULT_EMBED_API_KEY"),
+        help="Bearer token for the embeddings endpoint (default: $MEMVAULT_EMBED_API_KEY)",
+    )
     return ap.parse_args()
 
 
@@ -189,11 +242,12 @@ def run(items, unit_fn, args, progress):
     `progress(n, total, questions)` renders the stderr progress line, which
     counts different things in each benchmark.
     """
+    embedder = embedder_from(args)
     costs = []
     questions = 0
     with open(args.out, "w", encoding="utf-8") as out:
         for n, item in enumerate(items, 1):
-            store = Store()
+            store = Store(embedder=embedder)
             try:
                 turns, asks = unit_fn(item)
                 store.ingest(turns)
@@ -213,7 +267,7 @@ def run(items, unit_fn, args, progress):
 
 def report(costs, args, extra, scripts):
     """Print the cost summary the product doc requires, and where to go next."""
-    summary = summarize(costs, model=args.model)
+    summary = summarize(costs, model=args.model, embedding_model=args.embed_model)
     summary.update(extra)
     summary["k"] = args.k
     summary["max_tokens"] = args.max_tokens
@@ -252,6 +306,7 @@ def _demo():
     summary = summarize([cost])
     assert summary["retrieval_calls"] == 1
     assert summary["input_cost_per_turn_usd"] > 0
+    assert summary["embedding_model"].startswith("none")
     print("ok  memvault_bench self-check")
 
 
