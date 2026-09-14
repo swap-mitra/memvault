@@ -34,9 +34,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use memvault_core::{
-    erase, explain, get_fact, lock, memory_as_of, open_stores, recover, supersede_fact, write_fact,
-    AsOfFact, AsOfQuery, Explanation, Indexes, InjectedFact, Keyring, Ledger, ModelFingerprint,
-    NamespaceId, Query, RecoveryConfig, SourceRef, WriteInput,
+    erase, explain, get_fact, lock, memory_as_of, open_stores, recover, supersede_fact,
+    write_fact_with_limit, AsOfFact, AsOfQuery, Config, Explanation, Indexes, InjectedFact, Keyring,
+    Ledger, ModelFingerprint, NamespaceId, Query, RecoveryConfig, SourceRef, WriteInput,
 };
 
 use crate::embed::Embedder;
@@ -254,6 +254,8 @@ struct Stores {
     fingerprint: ModelFingerprint,
     /// Set when `MEMVAULT_EMBED_URL`/`MEMVAULT_EMBED_MODEL` are configured.
     embedder: Option<Embedder>,
+    /// The directory's `memvault.toml`, defaults filled in.
+    config: Config,
 }
 
 impl Stores {
@@ -283,7 +285,7 @@ impl Stores {
             None => configured_dim,
         };
 
-        let (ledger, keyring, mut indexes) = open_stores(data_dir, requested.as_ref())?;
+        let memvault_core::Stores { ledger, keyring, mut indexes, config } = open_stores(data_dir, requested.as_ref())?;
         let fingerprint = indexes.vector.fingerprint().clone();
 
         // open_stores checked the width. A directory that already names a
@@ -313,7 +315,20 @@ impl Stores {
             }
         );
 
-        Ok(Stores { ledger, keyring: Mutex::new(keyring), indexes: Mutex::new(indexes), fingerprint, embedder })
+        // Retention runs at startup, where it is cheap and predictable,
+        // rather than on some search in the middle of a session.
+        if let Some(days) = config.retrievals.keep_days {
+            let outcome = ledger.prune_retrievals_before(chrono::Utc::now() - chrono::Duration::days(i64::from(days)))?;
+            if outcome.pruned > 0 {
+                eprintln!(
+                    "memvault-server: pruned {} retrieval records older than {days} days; retrievals chain now starts at seq {}",
+                    outcome.pruned,
+                    outcome.first_seq.unwrap_or(0)
+                );
+            }
+        }
+
+        Ok(Stores { ledger, keyring: Mutex::new(keyring), indexes: Mutex::new(indexes), fingerprint, embedder, config })
     }
 
     /// The provider's vector for `text`, or `None` when no provider is
@@ -357,7 +372,7 @@ impl MemVaultServer {
 
         let mut keyring = lock(&self.stores.keyring);
         let mut indexes = lock(&self.stores.indexes);
-        let written = write_fact(
+        let written = write_fact_with_limit(
             &self.stores.ledger,
             &mut indexes,
             &mut keyring,
@@ -373,6 +388,7 @@ impl MemVaultServer {
                 pinned: params.pinned,
                 source: params.source.map(|s| SourceRef(s.into_bytes())).unwrap_or_default(),
             },
+            self.stores.config.limits.max_content_bytes,
         )
         .map_err(|e| e.to_string())?;
 
@@ -453,6 +469,7 @@ impl MemVaultServer {
                 text: params.query,
                 embedding,
                 embedding_model,
+                decay: self.stores.config.decay_for(&NamespaceId(params.namespace.clone())),
                 namespace: NamespaceId(params.namespace),
                 as_of: None,
                 k: params.k,

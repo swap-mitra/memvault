@@ -13,9 +13,8 @@ use uuid::Uuid;
 
 use memvault_core::{
     erase, explain, explanation_row, get_fact, injected_contents, memory_as_of, open_stores, outcome_cell,
-    placeholder_embedding, recover, search, supersede_fact, write_fact, AsOfQuery, Explanation,
-    Indexes, Keyring, Ledger, NamespaceId, Outcome, Payload, Query, RecoveryConfig, SourceRef,
-    WriteInput, EXPLANATION_HEADER,
+    placeholder_embedding, recover, search, supersede_fact, write_fact_with_limit, AsOfQuery, Explanation,
+    NamespaceId, Outcome, Payload, Query, RecoveryConfig, SourceRef, Stores, WriteInput, EXPLANATION_HEADER,
 };
 
 #[derive(Parser)]
@@ -101,26 +100,35 @@ enum Command {
         #[arg(long)]
         reason: String,
     },
-    /// Verify the hash chain. Exits non-zero and reports the first
-    /// diverging seq if it's broken.
+    /// Verify both hash chains: facts, and retrievals. Exits non-zero and
+    /// reports the first diverging seq if either is broken.
     Verify {
-        /// Trust everything before this seq and verify only from here
-        /// forward. Defaults to a full verification from the genesis.
+        /// Trust everything in the facts chain before this seq and verify
+        /// only from here forward. Defaults to the genesis.
         #[arg(long, default_value_t = 0)]
         from: u64,
     },
     /// Rebuild the vector/keyword indexes from the ledger.
     Replay,
+    /// Drop old retrieval records from the front of the retrievals chain.
+    /// The newest always stays, and the chain still verifies from the
+    /// first record kept. Pruned searches can no longer be explained.
+    Prune {
+        /// Prune retrievals older than this many days. Defaults to
+        /// `[retrievals] keep_days` from memvault.toml.
+        #[arg(long = "keep-days", conflicts_with = "before")]
+        keep_days: Option<u32>,
+        /// Prune retrievals recorded before this instant (RFC 3339).
+        #[arg(long)]
+        before: Option<chrono::DateTime<Utc>>,
+    },
+    /// Print the effective memvault.toml for this data directory, defaults
+    /// filled in.
+    Config,
     /// Debug: print a raw ledger record by seq, attempting to decrypt an
     /// Assert's content so an erased fact visibly shows as undecryptable
     /// rather than simply omitted.
     DumpRecord { seq: u64 },
-}
-
-struct Stores {
-    ledger: Ledger,
-    keyring: Keyring,
-    indexes: Indexes,
 }
 
 /// The data directory decides its embedding width: the CLI never asks for
@@ -128,8 +136,7 @@ struct Stores {
 /// it has. The stand-in embeddings are sized to whatever that turns out to
 /// be.
 fn open(data_dir: &Path) -> Result<Stores, Box<dyn std::error::Error>> {
-    let (ledger, keyring, indexes) = open_stores(data_dir, None)?;
-    Ok(Stores { ledger, keyring, indexes })
+    open_stores(data_dir, None)
 }
 
 /// True only for a real terminal with color not explicitly disabled
@@ -219,7 +226,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let mut stores = open(&cli.data_dir)?;
             let fingerprint = stores.indexes.vector.fingerprint().clone();
             let embedding = placeholder_embedding(&content, fingerprint.dimensions);
-            let written_id = write_fact(
+            let written_id = write_fact_with_limit(
                 &stores.ledger,
                 &mut stores.indexes,
                 &mut stores.keyring,
@@ -235,6 +242,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     pinned: pin,
                     source: SourceRef::default(),
                 },
+                stores.config.limits.max_content_bytes,
             )?;
             println!("fact_id: {written_id}");
             if fact_id.is_some() {
@@ -252,6 +260,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     text: Some(query),
                     embedding: Some(embedding),
                     embedding_model: None,
+                    decay: stores.config.decay_for(&NamespaceId(namespace.clone())),
                     namespace: NamespaceId(namespace),
                     as_of: None,
                     k,
@@ -322,6 +331,31 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let stores = open(&cli.data_dir)?;
             stores.ledger.verify_from(from)?;
             println!("chain verified from seq {from}");
+            let first = stores.ledger.retrievals_first_seq()?.unwrap_or(0);
+            stores.ledger.verify_retrievals()?;
+            println!("retrievals chain verified from seq {first}");
+        }
+        Command::Prune { keep_days, before } => {
+            let stores = open(&cli.data_dir)?;
+            let cutoff = match (before, keep_days.or(stores.config.retrievals.keep_days)) {
+                (Some(before), _) => before,
+                (None, Some(days)) => Utc::now() - chrono::Duration::days(i64::from(days)),
+                (None, None) => return Err("nothing to prune by: pass --keep-days or --before, or set [retrievals] keep_days in memvault.toml".into()),
+            };
+            let outcome = stores.ledger.prune_retrievals_before(cutoff)?;
+            println!(
+                "pruned {} retrieval records recorded before {}; retrievals chain now starts at seq {}",
+                outcome.pruned,
+                cutoff.to_rfc3339(),
+                outcome.first_seq.unwrap_or(0)
+            );
+        }
+        Command::Config => {
+            let config = memvault_core::Config::load(&cli.data_dir)?;
+            println!("# {}/{}: every key optional; these are the effective values.", cli.data_dir.display(), memvault_core::CONFIG_FILE);
+            println!("# [retrievals] keep_days = N prunes retrievals older than N days at server start and on `memvault prune`.");
+            println!("# [namespaces.<name>] half_life_days / floor override [decay] for one namespace.");
+            print!("{}", config.to_toml());
         }
         Command::Replay => {
             let mut stores = open(&cli.data_dir)?;

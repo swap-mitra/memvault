@@ -14,6 +14,7 @@
 
 use uuid::Uuid;
 
+use crate::decay::DecayConfig;
 use crate::index::{IndexError, Indexes};
 use crate::record::{ModelFingerprint, NamespaceId};
 use chrono::{DateTime, Utc};
@@ -40,6 +41,9 @@ pub struct Query {
     pub as_of: Option<DateTime<Utc>>,
     pub k: usize,
     pub max_tokens: u32,
+    /// The decay prior to rank with: the namespace's from `memvault.toml`
+    /// (`Config::decay_for`), or `DecayConfig::default()`.
+    pub decay: DecayConfig,
 }
 
 #[derive(Debug, Clone, PartialEq)]

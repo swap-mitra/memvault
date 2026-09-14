@@ -11,8 +11,8 @@ use tonic::{Request, Response, Status};
 
 use memvault_core::{
     erase, explain as core_explain, get_fact, injected_contents, lock, memory_as_of, search as core_search,
-    supersede_fact, write_fact, AsOfFact, AsOfQuery, Explanation, InjectedFact, NamespaceId, Query,
-    SourceRef, WriteInput,
+    supersede_fact, write_fact_with_limit, AsOfFact, AsOfQuery, Explanation, InjectedFact, NamespaceId,
+    Query, SourceRef, WriteInput,
 };
 
 use crate::Stores;
@@ -105,7 +105,7 @@ impl Memory for MemoryService {
 
         let mut keyring = lock(&self.stores.keyring);
         let mut indexes = lock(&self.stores.indexes);
-        let written = write_fact(
+        let written = write_fact_with_limit(
             &self.stores.ledger,
             &mut indexes,
             &mut keyring,
@@ -121,6 +121,7 @@ impl Memory for MemoryService {
                 pinned: req.pinned,
                 source: req.source.map(|s| SourceRef(s.into_bytes())).unwrap_or_default(),
             },
+            self.stores.config.limits.max_content_bytes,
         )
         .map_err(engine_err)?;
 
@@ -150,6 +151,7 @@ impl Memory for MemoryService {
                 text: req.query,
                 embedding,
                 embedding_model,
+                decay: self.stores.config.decay_for(&NamespaceId(req.namespace.clone())),
                 namespace: NamespaceId(req.namespace),
                 as_of: None,
                 k: req.k as usize,

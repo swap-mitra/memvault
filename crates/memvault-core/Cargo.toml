@@ -10,11 +10,15 @@ chacha20poly1305 = "0.11.0"
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
 cxx = "1.0.199"
 redb = "4.1.0"
+# memvault.toml (config.rs): the one file a user edits by hand, so the
+# format is the one they expect for that.
+serde = { version = "1.0.229", features = ["derive"] }
 tantivy = "0.26.1"
 thiserror = "2.0.18"
 # Behind `tokenizer` only: real token counts for budget packing need a BPE
 # vocabulary, and the default build stays free of anything model-shaped.
 tiktoken-rs = { version = "0.12.0", optional = true }
+toml = "1.1.6"
 usearch = "2.26.0"
 uuid = "1.24.1"
 

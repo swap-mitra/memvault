@@ -2,6 +2,7 @@
 use chrono::{Duration, Utc};
 use uuid::Uuid;
 
+use crate::decay::DecayConfig;
 use crate::explain::{explain, search};
 use crate::read_path::Query;
 use crate::record::{NamespaceId, Outcome, SourceRef};
@@ -76,6 +77,7 @@ fn test_explanation_includes_all_outcomes() {
         as_of: None,
         k: 2,
         max_tokens: 10, // enough for "injected"'s small ciphertext, not for the 200-byte one
+        decay: DecayConfig::default(),
     };
 
     let (explanations, retrieval_id) = search(&h.ledger, &h.indexes, &h.keyring, query).unwrap();
@@ -94,14 +96,9 @@ fn test_explanation_includes_all_outcomes() {
     assert_eq!(outcome_of(filtered_by_time), Outcome::FilteredByTime);
     assert_eq!(explanations.len(), 4, "every considered candidate must appear, not just the winners");
 
-    // The full trail was also durably written as a Retrieval record.
-    let retrieval_record = h
-        .ledger
-        .scan_from(0)
-        .unwrap()
-        .map(|r| r.unwrap())
-        .find(|r| matches!(&r.payload, crate::record::Payload::Retrieval(ret) if ret.retrieval_id == retrieval_id))
-        .expect("Retrieval record not found in ledger");
+    // The full trail was also durably written as a Retrieval record, in
+    // the retrievals chain, indexed by id.
+    let retrieval_record = h.ledger.find_retrieval(retrieval_id).unwrap().expect("Retrieval record not found in the retrievals chain");
     match retrieval_record.payload {
         crate::record::Payload::Retrieval(ret) => assert_eq!(ret.candidates.len(), 4),
         _ => unreachable!(),
@@ -122,6 +119,7 @@ fn explain_reconstructs_a_past_retrieval_exactly() {
         as_of: None,
         k: 5,
         max_tokens: 4096,
+        decay: DecayConfig::default(),
     };
     let (original, retrieval_id) = search(&h.ledger, &h.indexes, &h.keyring, query).unwrap();
 
@@ -168,6 +166,7 @@ fn test_search_never_returns_another_namespaces_facts() {
             as_of: None,
             k: 10,
             max_tokens: 4096,
+            decay: DecayConfig::default(),
         },
     )
     .unwrap();
@@ -203,6 +202,7 @@ fn injected_contents_returns_only_what_was_injected_in_order() {
             as_of: None,
             k: 10,
             max_tokens: 40,
+            decay: DecayConfig::default(),
         },
     )
     .unwrap();
@@ -238,6 +238,7 @@ fn token_cost_is_a_real_token_count_under_the_tokenizer_feature() {
             as_of: None,
             k: 10,
             max_tokens: 4096,
+            decay: DecayConfig::default(),
         },
     )
     .unwrap();

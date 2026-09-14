@@ -21,9 +21,8 @@ use crate::index::{IndexError, Indexes};
 use crate::ledger::{Ledger, LedgerError};
 use crate::record::{Assert, ModelFingerprint, NamespaceId, SourceRef};
 
-/// Default from product doc §6.9's example config. Becomes a real
-/// per-namespace setting once namespace config loading exists; no such
-/// loader exists yet, so this is the one value used everywhere for now.
+/// Product doc §6.9's example config: what `write_fact` enforces, and what
+/// `[limits] max_content_bytes` in `memvault.toml` defaults to.
 pub const DEFAULT_MAX_CONTENT_BYTES: usize = 65536;
 
 pub struct WriteInput {
@@ -62,15 +61,15 @@ pub enum WriteError {
     Index(#[from] IndexError),
 }
 
-fn validate(input: &WriteInput) -> Result<(), WriteError> {
+fn validate(input: &WriteInput, max_content_bytes: usize) -> Result<(), WriteError> {
     if let Some(valid_to) = input.valid_to {
         if valid_to <= input.valid_from {
             return Err(WriteError::InvalidInterval);
         }
     }
-    if input.content.len() > DEFAULT_MAX_CONTENT_BYTES {
+    if input.content.len() > max_content_bytes {
         return Err(WriteError::ContentTooLarge {
-            max: DEFAULT_MAX_CONTENT_BYTES,
+            max: max_content_bytes,
             actual: input.content.len(),
         });
     }
@@ -85,8 +84,15 @@ fn validate(input: &WriteInput) -> Result<(), WriteError> {
     Ok(())
 }
 
+/// `write_fact_with_limit` at the default content limit.
 pub fn write_fact(ledger: &Ledger, indexes: &mut Indexes, keyring: &mut Keyring, input: WriteInput) -> Result<Uuid, WriteError> {
-    validate(&input)?;
+    write_fact_with_limit(ledger, indexes, keyring, input, DEFAULT_MAX_CONTENT_BYTES)
+}
+
+/// The write path with the directory's own content limit
+/// (`Config::limits.max_content_bytes`), which is what every surface uses.
+pub fn write_fact_with_limit(ledger: &Ledger, indexes: &mut Indexes, keyring: &mut Keyring, input: WriteInput, max_content_bytes: usize) -> Result<Uuid, WriteError> {
+    validate(&input, max_content_bytes)?;
 
     let fact_id = input.fact_id.unwrap_or_else(Uuid::new_v4);
     let content_hash = crypto::content_hash(&input.content);

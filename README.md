@@ -72,7 +72,7 @@ provision, no service to keep alive.
 
 | Binary | What it is |
 |---|---|
-| `memvault` | CLI: `write`, `search`, `get`, `explain`, `as-of`, `supersede`, `forget`, `verify`, `replay`, `mcp-config` |
+| `memvault` | CLI: `write`, `search`, `get`, `explain`, `as-of`, `supersede`, `forget`, `verify`, `replay`, `prune`, `config`, `mcp-config` |
 | `memvault-server` | MCP server over stdio, for agents to talk to |
 
 **Python.** Download the wheel for your platform from the same release and
@@ -381,6 +381,7 @@ memvault --data-dir ./my-memory explain f96a229c-4d63-4db8-834d-1b98877611dd
 ```sh
 memvault --data-dir ./my-memory verify
 # chain verified from seq 0
+# retrievals chain verified from seq 0
 
 memvault --data-dir ./my-memory forget 34e2001b-1603-45c5-abbe-f5fbcf31d4a8 \
   --reason "customer deletion request"
@@ -388,7 +389,13 @@ memvault --data-dir ./my-memory forget 34e2001b-1603-45c5-abbe-f5fbcf31d4a8 \
 
 memvault --data-dir ./my-memory verify
 # chain verified from seq 0
+# retrievals chain verified from seq 0
 ```
+
+Facts and retrievals are two hash chains. The facts chain holds every
+assert, supersession and erase and is never pruned; the retrievals chain
+holds one record per search, so `explain` has something to replay, and can
+be trimmed by a retention policy (see [Operating it](#operating-it)).
 
 The fact is gone from search, but its record is still in the ledger — the
 history stays honest, and the content is unrecoverable because its key was
@@ -447,9 +454,40 @@ after it are short.
 
 | | |
 |---|---|
-| `ledger.redb` | The hash-chained ledger: every fact, supersession, erase and retrieval, encrypted content included. The only file that is the truth. |
+| `ledger.redb` | The facts chain: every fact, supersession and erase, encrypted content included. Grows only when memory changes, never pruned. With `keys.redb`, the truth. |
+| `retrievals.redb` | The retrievals chain: one record per search, indexed by `retrieval_id` for `explain`. Prunable from the front by age. |
 | `keys.redb` | One key per fact. `forget` deletes a key here; that is the whole erase. |
+| `memvault.toml` | Optional settings, below. Absent means the defaults. |
 | `vectors.usearch`, `vectors.usearch.meta.redb`, `keyword/`, `keyword.watermark` | Derived indexes. Deletable; `memvault replay` (or any server start) rebuilds them from the ledger. |
+
+**Configuration** lives in `memvault.toml` in the data directory. Every key
+is optional; `memvault config` prints the effective values:
+
+```toml
+[decay]
+half_life_days = 30.0     # how fast an unpinned fact's rank fades
+floor = 0.15              # the weight it never fades below
+
+[limits]
+max_content_bytes = 65536
+
+[retrievals]
+keep_days = 90            # unset: keep every retrieval forever
+
+[namespaces.project]      # per-namespace decay; unset fields fall back to [decay]
+half_life_days = 7.0
+```
+
+A file that is present but wrong (a typo in a key, a floor above 1) is
+refused at open rather than silently replaced by the defaults.
+
+**Retention.** Every search appends a Retrieval record, so an agent that
+searches on every turn writes far more retrievals than facts. `keep_days`
+prunes retrievals older than that from the front of the retrievals chain
+when the server starts, and `memvault prune` (with `--keep-days` or
+`--before`) does it on demand. The newest record always stays, the chain
+still verifies from the first record kept, and a pruned search can no
+longer be explained. Facts are never pruned.
 
 **Back it up stopped.** The ledger takes an exclusive file lock while a
 process has it open, so a second opener fails rather than reading a half-

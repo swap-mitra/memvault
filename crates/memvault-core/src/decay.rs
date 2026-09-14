@@ -6,9 +6,18 @@ use uuid::Uuid;
 
 use crate::read_path::FusedCandidate;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DecayConfig {
     pub half_life_days: f64,
     pub floor: f64,
+}
+
+/// Product doc §6.9's example configuration, and what a namespace gets when
+/// `memvault.toml` says nothing about it.
+impl Default for DecayConfig {
+    fn default() -> Self {
+        DecayConfig { half_life_days: 30.0, floor: 0.15 }
+    }
 }
 
 /// `w(f) = max(floor, exp(-ln(2) * age_days / half_life_days))`.

@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 
 use clap::Parser;
 use memvault_core::{
-    open_stores, placeholder_embedding, recover, search, write_fact,
-    NamespaceId, Query, RecoveryConfig, SourceRef, WriteInput, PLACEHOLDER_EMBEDDING_NAME,
+    open_stores, placeholder_embedding, recover, search, write_fact, DecayConfig, NamespaceId, Query,
+    RecoveryConfig, SourceRef, WriteInput, PLACEHOLDER_EMBEDDING_NAME,
 };
 
 const NAMESPACE: &str = "bench";
@@ -111,7 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let owns_scratch = args.data_dir.is_none();
 
-    let (ledger, mut keyring, mut indexes) = open_stores(&scratch, None)?;
+    let memvault_core::Stores { ledger, mut keyring, mut indexes, .. } = open_stores(&scratch, None)?;
     let fingerprint = indexes.vector.fingerprint().clone();
 
     // --- corpus ---------------------------------------------------------
@@ -167,6 +167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     text: Some(text),
                     embedding: Some(embedding),
                     embedding_model: None,
+                    decay: DecayConfig::default(),
                     namespace: NamespaceId(NAMESPACE.into()),
                     as_of: None,
                     k: args.k,
@@ -195,12 +196,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ledger.verify()?;
     let verify = verify_start.elapsed();
     println!("\nchain verification");
-    // Higher than corpus_size: every search above appended a Retrieval
-    // record, and verification walks the whole chain.
-    println!("  protocol             full BLAKE3 chain walk from genesis to head, single-threaded; the chain holds retrieval records too, so this exceeds corpus_size");
+    println!("  protocol             full BLAKE3 walk of the facts chain from genesis to head, single-threaded; retrievals live in their own chain, measured below");
     println!("  records              {head} records");
     println!("  elapsed              {:.3} s", verify.as_secs_f64());
     println!("  throughput           {:.1} records/s", head as f64 / verify.as_secs_f64());
+
+    // Every search above appended one record here; this is the chain the
+    // retention policy prunes.
+    let retrievals = ledger.retrievals_head()? - ledger.retrievals_first_seq()?.unwrap_or(0);
+    let verify_start = Instant::now();
+    ledger.verify_retrievals()?;
+    let verify = verify_start.elapsed();
+    println!("\nretrievals chain verification");
+    println!("  protocol             full BLAKE3 walk of the retrievals chain from its oldest retained record, single-threaded; one record per search above");
+    println!("  records              {retrievals} records");
+    println!("  elapsed              {:.3} s", verify.as_secs_f64());
+    println!("  throughput           {:.1} records/s", retrievals as f64 / verify.as_secs_f64());
 
     // --- index rebuild --------------------------------------------------
     // Reset one index at a time: replay skips records already at the other

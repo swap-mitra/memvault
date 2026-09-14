@@ -4,6 +4,34 @@ Notable changes, newest first. MemVault is pre-1.0: the on-disk format and
 the Python API may change between minor versions, and this file is where
 that is announced.
 
+## Unreleased
+
+### Added
+
+- `memvault.toml` in the data directory: `[decay]` half-life and floor,
+  `[limits] max_content_bytes`, `[retrievals] keep_days`, and
+  `[namespaces.<name>]` decay overrides. `memvault config` prints the
+  effective values. A present-but-wrong file is refused rather than
+  defaulted.
+- Retrieval records now live in their own hash chain, `retrievals.redb`,
+  indexed by `retrieval_id`: `explain` is a lookup instead of a scan, and
+  the facts chain grows only when memory changes. `memvault prune` (and
+  `keep_days` at server start) drops old retrievals from the front; the
+  newest always stays and the chain still verifies from the first record
+  kept. `verify` now reports both chains. Python: `prune_retrievals()`.
+- The benchmark harnesses take `--embed-url`/`--embed-model` so quality
+  runs use a real embedding model, and the summary names it.
+
+### Changed
+
+- **On-disk layout.** New searches write to `retrievals.redb`. Existing
+  directories open unchanged; retrievals recorded before this version stay
+  in `ledger.redb`, where `explain` still finds them by scan, and are not
+  subject to pruning.
+- Python `search()` accepts an `embedding`; the harness was still using the
+  0.1.0-era tuple return and has been fixed. It now runs in CI.
+- `memvault-bench` reports the two chains' verification separately.
+
 ## 0.1.0 (2026-09-14)
 
 First tagged release. Prebuilt `memvault` and `memvault-server` for Linux

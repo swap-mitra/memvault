@@ -32,6 +32,7 @@ fn report_states_every_claim_with_its_protocol_and_units() {
         "retrieval latency, index-only",
         "retrieval latency, end-to-end",
         "chain verification",
+        "retrievals chain verification",
         "index rebuild, full, from the ledger",
     ] {
         assert!(report.contains(section), "report is missing the {section:?} section:\n{report}");
@@ -55,8 +56,8 @@ fn report_states_every_claim_with_its_protocol_and_units() {
     // Every section that reports a number explains how it was measured.
     assert_eq!(
         report.matches("protocol ").count(),
-        4,
-        "each of the four measured sections needs its own protocol line:\n{report}"
+        5,
+        "each of the five measured sections needs its own protocol line:\n{report}"
     );
 }
 

@@ -19,7 +19,8 @@ use uuid::Uuid;
 
 use memvault_core::{
     erase, explain as core_explain, get_fact, injected_contents, lock, memory_as_of, open_stores,
-    recover, search as core_search, supersede_fact, write_fact, AsOfFact, AsOfQuery, Explanation as CoreExplanation,
+    recover, search as core_search, supersede_fact, write_fact_with_limit, AsOfFact, AsOfQuery, Config,
+    Explanation as CoreExplanation,
     Indexes, InjectedFact, Keyring, Ledger, ModelFingerprint, NamespaceId, Query, RecoveryConfig,
     SourceRef, WriteInput,
 };
@@ -156,6 +157,8 @@ struct Stores {
     /// The data directory's embedding fingerprint, read from the vector
     /// index once at open: what every write is validated against.
     fingerprint: ModelFingerprint,
+    /// The directory's `memvault.toml`, defaults filled in.
+    config: Config,
 }
 
 /// An open MemVault data directory. Cheap to keep alive for the life of the
@@ -204,13 +207,13 @@ impl PyMemVault {
         }
         py.detach(|| {
             let requested = embedding_dim.map(ModelFingerprint::caller_supplied);
-            let (ledger, keyring, mut indexes) = open_stores(&data_dir, requested.as_ref()).map_err(engine_err)?;
+            let memvault_core::Stores { ledger, keyring, mut indexes, config } = open_stores(&data_dir, requested.as_ref()).map_err(engine_err)?;
             let fingerprint = indexes.vector.fingerprint().clone();
 
             recover(&ledger, &mut indexes, &keyring, &fingerprint, RecoveryConfig { verify_chain: true })
                 .map_err(engine_err)?;
 
-            Ok(PyMemVault { stores: Mutex::new(Stores { ledger, keyring, indexes, fingerprint }) })
+            Ok(PyMemVault { stores: Mutex::new(Stores { ledger, keyring, indexes, fingerprint, config }) })
         })
     }
 
@@ -243,8 +246,8 @@ impl PyMemVault {
 
         py.detach(|| {
             let mut stores = lock(&self.stores);
-            let Stores { ledger, keyring, indexes, fingerprint } = &mut *stores;
-            write_fact(
+            let Stores { ledger, keyring, indexes, fingerprint, config } = &mut *stores;
+            write_fact_with_limit(
                 ledger,
                 indexes,
                 keyring,
@@ -260,6 +263,7 @@ impl PyMemVault {
                     pinned,
                     source: source.map(|s| SourceRef(s.into_bytes())).unwrap_or_default(),
                 },
+                config.limits.max_content_bytes,
             )
             .map(|id| id.to_string())
             .map_err(engine_err)
@@ -289,6 +293,7 @@ impl PyMemVault {
                     text: query,
                     embedding,
                     embedding_model: None,
+                    decay: stores.config.decay_for(&NamespaceId(namespace.clone())),
                     namespace: NamespaceId(namespace),
                     as_of: None,
                     k,
@@ -386,13 +391,31 @@ impl PyMemVault {
         })
     }
 
-    /// Verify the hash chain from `from` forward. Raises on the first
-    /// divergent seq.
+    /// Verify both hash chains: facts from `from` forward, retrievals from
+    /// the oldest record still kept. Raises on the first divergent seq.
     #[pyo3(signature = (*, from=0))]
     fn verify(&self, py: Python<'_>, from: u64) -> PyResult<()> {
         py.detach(|| {
             let stores = lock(&self.stores);
-            stores.ledger.verify_from(from).map_err(engine_err)
+            stores.ledger.verify_from(from).map_err(engine_err)?;
+            stores.ledger.verify_retrievals().map_err(engine_err)
+        })
+    }
+
+    /// Drop retrieval records older than `keep_days` (default: the
+    /// directory's `[retrievals] keep_days`) or recorded before `before`
+    /// (RFC 3339). The newest always stays. Returns how many were pruned.
+    #[pyo3(signature = (*, keep_days=None, before=None))]
+    fn prune_retrievals(&self, py: Python<'_>, keep_days: Option<u32>, before: Option<&str>) -> PyResult<u64> {
+        let before = parse_time("before", before)?;
+        py.detach(|| {
+            let stores = lock(&self.stores);
+            let cutoff = match (before, keep_days.or(stores.config.retrievals.keep_days)) {
+                (Some(before), _) => before,
+                (None, Some(days)) => Utc::now() - chrono::Duration::days(i64::from(days)),
+                (None, None) => return Err(PyValueError::new_err("pass keep_days or before, or set [retrievals] keep_days in memvault.toml")),
+            };
+            stores.ledger.prune_retrievals_before(cutoff).map(|o| o.pruned).map_err(engine_err)
         })
     }
 }

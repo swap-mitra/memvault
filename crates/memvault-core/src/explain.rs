@@ -13,17 +13,11 @@ use uuid::Uuid;
 
 use crate::budget::pack_to_budget;
 use crate::crypto::{DecryptError, Keyring};
-use crate::decay::{apply_decay, DecayConfig, ScoredCandidate};
+use crate::decay::{apply_decay, ScoredCandidate};
 use crate::index::{IndexError, Indexes};
 use crate::ledger::{Ledger, LedgerError};
 use crate::read_path::{hybrid_search, FusedCandidate, Query, SearchError as HybridSearchError};
 use crate::record::{Encrypted, Explanation, NamespaceId, Outcome, Payload, Retrieval};
-
-// ponytail: doc §6.9's namespace-config defaults, hardcoded until a real
-// per-namespace config loader exists. Upgrade path: read these from
-// namespace config once that's built.
-const DEFAULT_HALF_LIFE_DAYS: f64 = 30.0;
-const DEFAULT_DECAY_FLOOR: f64 = 0.15;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SearchError {
@@ -120,6 +114,7 @@ pub fn search(ledger: &Ledger, indexes: &Indexes, keyring: &Keyring, query: Quer
     let query_text = query.text.clone();
     let query_embedding_model = query.embedding_model.clone();
     let as_of = query.as_of;
+    let decay = query.decay;
 
     let fused = hybrid_search(indexes, &query)?;
     let now = Utc::now();
@@ -176,7 +171,7 @@ pub fn search(ledger: &Ledger, indexes: &Indexes, keyring: &Keyring, query: Quer
     let candidates: Vec<FusedCandidate> = resolved.iter().map(|r| r.fused.clone()).collect();
     let resolved: HashMap<Uuid, Resolved> = resolved.into_iter().map(|r| (r.fused.fact_id, r)).collect();
 
-    let cfg = DecayConfig { half_life_days: DEFAULT_HALF_LIFE_DAYS, floor: DEFAULT_DECAY_FLOOR };
+    let cfg = decay;
     let mut scored = apply_decay(
         candidates,
         |id| resolved[&id].pinned,
@@ -246,7 +241,7 @@ pub fn injected_contents(ledger: &Ledger, keyring: &Keyring, explanations: &[Exp
 pub enum ExplainError {
     #[error(transparent)]
     Ledger(LedgerError),
-    #[error("no retrieval with that id in the ledger")]
+    #[error("no retrieval with that id in the ledger (never made here, or pruned by the retention policy)")]
     NotFound,
 }
 
@@ -277,10 +272,17 @@ pub fn outcome_cell(e: &Explanation) -> String {
     format!("{:>13}", format!("{:?}", e.outcome))
 }
 
-/// Reconstructs a past retrieval exactly from its `Retrieval` ledger
-/// record. A linear scan: fine at the ledger sizes this project targets,
-/// and there's no retrieval_id index yet to do better with.
+/// Reconstructs a past retrieval exactly from its `Retrieval` record: an
+/// index lookup in the retrievals chain. Directories written before that
+/// chain existed hold their retrievals in the facts chain, unindexed, so a
+/// miss falls back to scanning there; the cost of reading old history,
+/// paid only for ids the index doesn't know.
 pub fn explain(ledger: &Ledger, retrieval_id: Uuid) -> Result<Vec<Explanation>, ExplainError> {
+    if let Some(record) = ledger.find_retrieval(retrieval_id).map_err(ExplainError::Ledger)? {
+        if let Payload::Retrieval(r) = record.payload {
+            return Ok(r.candidates);
+        }
+    }
     for record in ledger.scan_from(0).map_err(ExplainError::Ledger)? {
         let record = record.map_err(ExplainError::Ledger)?;
         if let Payload::Retrieval(r) = record.payload {

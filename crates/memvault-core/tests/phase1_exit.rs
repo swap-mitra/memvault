@@ -6,7 +6,7 @@ use chrono::{Duration, Utc};
 use tempfile::TempDir;
 use uuid::Uuid;
 
-use memvault_core::{
+use memvault_core::{DecayConfig, 
     erase, explain, search, write_fact, Indexes, KeywordIndex, Keyring, Ledger, ModelFingerprint,
     NamespaceId, Outcome, Query, SourceRef, VectorIndex, WriteInput,
 };
@@ -84,6 +84,7 @@ fn test_exit_explain_and_erase() {
         as_of: None,
         k: 2,
         max_tokens: 10,
+        decay: DecayConfig::default(),
     };
     let (explanations, retrieval_id) = search(&h.ledger, &h.indexes, &h.keyring, query).unwrap();
 
@@ -116,6 +117,7 @@ fn test_exit_explain_and_erase() {
             as_of: None,
             k: 10,
             max_tokens: 10_000,
+            decay: DecayConfig::default(),
         },
     )
     .unwrap();

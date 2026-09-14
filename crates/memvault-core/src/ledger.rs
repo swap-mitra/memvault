@@ -16,19 +16,36 @@
 //! open assert" and leave two simultaneously-open Asserts behind, which
 //! is exactly the bitemporal invariant (product doc §3 P2) this exists to
 //! protect.
+//!
+//! Two chains live here. The *facts* chain (`ledger.redb`) holds Assert,
+//! Supersede, Erase and Checkpoint records and grows only when memory
+//! changes; it is never pruned. The *retrievals* chain (`retrievals.redb`,
+//! alongside) holds one Retrieval record per search, indexed by
+//! retrieval_id so `explain` is a lookup rather than a scan, and it can be
+//! pruned from the front by age: the oldest retained record's `prev_hash`
+//! still commits to everything pruned before it, so verification from that
+//! point stays sound while the history stops growing without bound. An
+//! agent that searches on every turn writes far more retrievals than
+//! facts, and without this split the facts chain paid for all of them.
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
-use redb::{ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
+use redb::{ReadableDatabase, ReadableTable, TableDefinition};
 use uuid::Uuid;
 
 use crate::chain;
 use crate::record::{self, Assert, DecodeError, Erase, NamespaceId, Payload, Record, Supersede};
 
 const RECORDS_TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("records");
+/// retrieval_id bytes -> seq. Only the retrievals chain ever has entries;
+/// written in the same transaction as the record it points at.
+const RETRIEVAL_INDEX: TableDefinition<&[u8], u64> = TableDefinition::new("retrieval_index");
+
+/// The retrievals chain's file, next to `ledger.redb` in a data directory.
+pub const RETRIEVALS_FILE: &str = "retrievals.redb";
 
 #[derive(Debug, thiserror::Error)]
 pub enum LedgerError {
@@ -49,8 +66,177 @@ pub enum LedgerError {
 
 crate::redb_error!(LedgerError, LedgerError::Redb);
 
-pub struct Ledger {
+/// One hash chain in one redb file. `Ledger` owns two.
+struct Chain {
     db: redb::Database,
+}
+
+impl Chain {
+    fn open(path: &Path) -> Result<Self, LedgerError> {
+        let db = redb::Database::create(path)?;
+
+        // Ensure the tables exist so every other method can assume they do,
+        // rather than special-casing "never written to" everywhere.
+        let txn = db.begin_write()?;
+        txn.open_table(RECORDS_TABLE)?;
+        txn.open_table(RETRIEVAL_INDEX)?;
+        txn.commit()?;
+
+        Ok(Chain { db })
+    }
+
+    /// The oldest seq still present. Zero for an unpruned chain, higher
+    /// after `prune_before`, `None` when empty.
+    fn first_seq(&self) -> Result<Option<u64>, LedgerError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(RECORDS_TABLE)?;
+        Ok(table.first()?.map(|(k, _)| k.value()))
+    }
+
+    /// The seq the next `append` gets: one past the newest record. Not the
+    /// record count, since pruning removes records from the front without
+    /// renumbering what remains.
+    fn head(&self) -> Result<u64, LedgerError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(RECORDS_TABLE)?;
+        Ok(table.last()?.map(|(k, _)| k.value() + 1).unwrap_or(0))
+    }
+
+    fn append_batch(&self, namespace: NamespaceId, recorded_at: DateTime<Utc>, payloads: Vec<Payload>) -> Result<Vec<u64>, LedgerError> {
+        let write_txn = self.db.begin_write()?;
+        let mut seqs = Vec::with_capacity(payloads.len());
+        {
+            let mut table = write_txn.open_table(RECORDS_TABLE)?;
+            let mut index = write_txn.open_table(RETRIEVAL_INDEX)?;
+
+            let (mut next_seq, mut prev_hash): (u64, [u8; 32]) = match table.last()? {
+                Some((seq, bytes)) => (seq.value() + 1, blake3::hash(bytes.value()).into()),
+                None => (0, chain::GENESIS_PREV_HASH),
+            };
+
+            for payload in payloads {
+                let record = Record::new(next_seq, prev_hash, recorded_at, namespace.clone(), payload);
+                if let Payload::Retrieval(r) = &record.payload {
+                    index.insert(r.retrieval_id.as_bytes().as_slice(), next_seq)?;
+                }
+                let bytes = record::canonical_bytes(&record);
+                table.insert(next_seq, bytes.as_slice())?;
+                prev_hash = blake3::hash(&bytes).into();
+                seqs.push(next_seq);
+                next_seq += 1;
+            }
+        }
+        write_txn.commit()?;
+        Ok(seqs)
+    }
+
+    fn read(&self, seq: u64) -> Result<Option<Record>, LedgerError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(RECORDS_TABLE)?;
+        match table.get(seq)? {
+            Some(guard) => Ok(Some(record::decode_record(guard.value())?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Streams records from `seq` (inclusive) to the current head. The
+    /// returned iterator owns its snapshot (redb's reference-counted
+    /// `range`, not the transaction-borrowed one) so it outlives this call.
+    fn scan_from(&self, seq: u64) -> Result<impl Iterator<Item = Result<Record, LedgerError>>, LedgerError> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(RECORDS_TABLE)?;
+        let range = table.range(seq..)?;
+
+        Ok(range.map(|entry| {
+            let (_, value) = entry.map_err(|e| LedgerError::Redb(e.into()))?;
+            Ok(record::decode_record(value.value())?)
+        }))
+    }
+
+    /// Verifies from `seq` onward, trusting the record at `seq` as an
+    /// already-verified resume point (see `chain::verify_chain_from`).
+    fn verify_from(&self, seq: u64) -> Result<(), VerifyError> {
+        let records = self.scan_from(seq).map_err(VerifyError::Ledger)?;
+        let mut collected = Vec::new();
+        for record in records {
+            collected.push(record.map_err(VerifyError::Ledger)?);
+        }
+        chain::verify_chain_from(collected.into_iter(), seq).map_err(VerifyError::Chain)
+    }
+
+    /// Verifies everything still present: from the genesis for an
+    /// unpruned chain, from the oldest retained record otherwise.
+    fn verify(&self) -> Result<(), VerifyError> {
+        match self.first_seq().map_err(VerifyError::Ledger)? {
+            Some(first) => self.verify_from(first),
+            None => Ok(()),
+        }
+    }
+
+    fn find_retrieval(&self, retrieval_id: Uuid) -> Result<Option<Record>, LedgerError> {
+        let txn = self.db.begin_read()?;
+        let index = txn.open_table(RETRIEVAL_INDEX)?;
+        let Some(seq) = index.get(retrieval_id.as_bytes().as_slice())?.map(|g| g.value()) else {
+            return Ok(None);
+        };
+        let table = txn.open_table(RECORDS_TABLE)?;
+        match table.get(seq)? {
+            Some(guard) => Ok(Some(record::decode_record(guard.value())?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Removes every record recorded before `cutoff`, except the newest
+    /// record, which always stays: it is the anchor the next append chains
+    /// from, and its `prev_hash` is what still commits to everything
+    /// removed. Records are appended in time order, so the walk stops at
+    /// the first one at or after the cutoff.
+    fn prune_before(&self, cutoff: DateTime<Utc>) -> Result<PruneOutcome, LedgerError> {
+        let mut doomed: Vec<(u64, Option<Uuid>)> = Vec::new();
+        {
+            let txn = self.db.begin_read()?;
+            let table = txn.open_table(RECORDS_TABLE)?;
+            let newest = table.last()?.map(|(k, _)| k.value());
+            for entry in table.iter()? {
+                let (seq, bytes) = entry.map_err(|e| LedgerError::Redb(e.into()))?;
+                let seq = seq.value();
+                if Some(seq) == newest {
+                    break;
+                }
+                let record = record::decode_record(bytes.value())?;
+                if record.header.recorded_at >= cutoff {
+                    break;
+                }
+                let retrieval_id = match &record.payload {
+                    Payload::Retrieval(r) => Some(r.retrieval_id),
+                    _ => None,
+                };
+                doomed.push((seq, retrieval_id));
+            }
+        }
+
+        if !doomed.is_empty() {
+            let write_txn = self.db.begin_write()?;
+            {
+                let mut table = write_txn.open_table(RECORDS_TABLE)?;
+                let mut index = write_txn.open_table(RETRIEVAL_INDEX)?;
+                for (seq, retrieval_id) in &doomed {
+                    table.remove(*seq)?;
+                    if let Some(id) = retrieval_id {
+                        index.remove(id.as_bytes().as_slice())?;
+                    }
+                }
+            }
+            write_txn.commit()?;
+        }
+
+        Ok(PruneOutcome { pruned: doomed.len() as u64, first_seq: self.first_seq()? })
+    }
+}
+
+pub struct Ledger {
+    facts: Chain,
+    retrievals: Chain,
     /// fact_id -> ledger seq of its currently-open Assert. A pure derived
     /// cache: rebuilt by a full replay on every `open()`, kept in sync by
     /// `write_assert` on every write. Not persisted separately -- there is
@@ -59,16 +245,12 @@ pub struct Ledger {
 }
 
 impl Ledger {
+    /// Opens the facts chain at `path` and the retrievals chain in
+    /// [`RETRIEVALS_FILE`] beside it, creating either if absent.
     pub fn open(path: &Path) -> Result<Self, LedgerError> {
-        let db = redb::Database::create(path)?;
-
-        // Ensure the table exists so every other method can assume it does,
-        // rather than special-casing "never written to" everywhere.
-        let txn = db.begin_write()?;
-        txn.open_table(RECORDS_TABLE)?;
-        txn.commit()?;
-
-        let ledger = Ledger { db, open_facts: Mutex::new(HashMap::new()) };
+        let facts = Chain::open(path)?;
+        let retrievals = Chain::open(&path.with_file_name(RETRIEVALS_FILE))?;
+        let ledger = Ledger { facts, retrievals, open_facts: Mutex::new(HashMap::new()) };
 
         let mut open_facts = HashMap::new();
         for record in ledger.scan_from(0)? {
@@ -96,52 +278,30 @@ impl Ledger {
         crate::lock(&self.open_facts).get(&fact_id).copied()
     }
 
-    /// Number of records in the ledger, i.e. the seq that will be assigned
-    /// to the next `append`. Zero for a freshly-opened, empty ledger.
+    /// Number of records in the facts chain, i.e. the seq that will be
+    /// assigned to the next facts-chain `append`. Zero when empty.
     pub fn head(&self) -> Result<u64, LedgerError> {
-        let txn = self.db.begin_read()?;
-        let table = txn.open_table(RECORDS_TABLE)?;
-        Ok(table.len()?)
+        self.facts.head()
     }
 
-    /// Appends a single record. Convenience wrapper over `append_batch`.
+    /// Appends a single record to the chain it belongs in: a `Retrieval`
+    /// to the retrievals chain, anything else to the facts chain.
     pub fn append(&self, namespace: NamespaceId, recorded_at: DateTime<Utc>, payload: Payload) -> Result<u64, LedgerError> {
-        Ok(self.append_batch(namespace, recorded_at, vec![payload])?[0])
+        let chain = match payload {
+            Payload::Retrieval(_) => &self.retrievals,
+            _ => &self.facts,
+        };
+        Ok(chain.append_batch(namespace, recorded_at, vec![payload])?[0])
     }
 
-    /// Appends `payloads` as consecutive records inside one write
-    /// transaction, chained from the current head. Returns their assigned
-    /// seqs in order. This is what lets `write_assert` commit a
+    /// Appends `payloads` as consecutive facts-chain records inside one
+    /// write transaction, chained from the current head. Returns their
+    /// assigned seqs in order. This is what lets `write_assert` commit a
     /// `Supersede` and its `Assert` atomically (product doc §6.3 step 4).
+    /// Retrievals go through `append`, one record each.
     pub fn append_batch(&self, namespace: NamespaceId, recorded_at: DateTime<Utc>, payloads: Vec<Payload>) -> Result<Vec<u64>, LedgerError> {
-        let write_txn = self.db.begin_write()?;
-        let mut seqs = Vec::with_capacity(payloads.len());
-        {
-            let mut table = write_txn.open_table(RECORDS_TABLE)?;
-            let mut next_seq = table.len()?;
-
-            let mut prev_hash = if next_seq == 0 {
-                chain::GENESIS_PREV_HASH
-            } else {
-                let prev_bytes = table
-                    .get(next_seq - 1)?
-                    .expect("append_batch: previous seq must exist below the current table length")
-                    .value()
-                    .to_vec();
-                blake3::hash(&prev_bytes).into()
-            };
-
-            for payload in payloads {
-                let record = Record::new(next_seq, prev_hash, recorded_at, namespace.clone(), payload);
-                let bytes = record::canonical_bytes(&record);
-                table.insert(next_seq, bytes.as_slice())?;
-                prev_hash = blake3::hash(&bytes).into();
-                seqs.push(next_seq);
-                next_seq += 1;
-            }
-        }
-        write_txn.commit()?;
-        Ok(seqs)
+        debug_assert!(!payloads.iter().any(|p| matches!(p, Payload::Retrieval(_))), "retrievals belong in their own chain; use `append`");
+        self.facts.append_batch(namespace, recorded_at, payloads)
     }
 
     /// Writes `assert`, first closing any currently-open Assert for the
@@ -238,44 +398,69 @@ impl Ledger {
         Ok(outcome.map(|(target_seq, erase_seq)| WriteEraseOutcome { target_seq, erase_seq }))
     }
 
+    /// One facts-chain record by seq.
     pub fn read(&self, seq: u64) -> Result<Option<Record>, LedgerError> {
-        let txn = self.db.begin_read()?;
-        let table = txn.open_table(RECORDS_TABLE)?;
-        match table.get(seq)? {
-            Some(guard) => Ok(Some(record::decode_record(guard.value())?)),
-            None => Ok(None),
-        }
+        self.facts.read(seq)
     }
 
-    /// Streams records from `seq` (inclusive) to the current head. The
-    /// returned iterator owns its snapshot (redb's reference-counted
-    /// `range`, not the transaction-borrowed one) so it outlives this call.
+    /// Streams facts-chain records from `seq` (inclusive) to the head.
     pub fn scan_from(&self, seq: u64) -> Result<impl Iterator<Item = Result<Record, LedgerError>>, LedgerError> {
-        let txn = self.db.begin_read()?;
-        let table = txn.open_table(RECORDS_TABLE)?;
-        let range = table.range(seq..)?;
-
-        Ok(range.map(|entry| {
-            let (_, value) = entry.map_err(|e| LedgerError::Redb(e.into()))?;
-            Ok(record::decode_record(value.value())?)
-        }))
+        self.facts.scan_from(seq)
     }
 
-    /// Verifies the chain over the current contents of the ledger.
+    /// Verifies the facts chain from the genesis.
     pub fn verify(&self) -> Result<(), VerifyError> {
         self.verify_from(0)
     }
 
-    /// Verifies the chain from `seq` onward, trusting the record at `seq`
-    /// as an already-verified resume point rather than re-deriving it from
-    /// a predecessor. `memvault verify --from`.
+    /// Verifies the facts chain from `seq` onward, trusting the record at
+    /// `seq` as an already-verified resume point rather than re-deriving it
+    /// from a predecessor. `memvault verify --from`.
     pub fn verify_from(&self, seq: u64) -> Result<(), VerifyError> {
-        let records = self.scan_from(seq).map_err(VerifyError::Ledger)?;
-        let mut collected = Vec::new();
-        for record in records {
-            collected.push(record.map_err(VerifyError::Ledger)?);
-        }
-        chain::verify_chain_from(collected.into_iter(), seq).map_err(VerifyError::Chain)
+        self.facts.verify_from(seq)
+    }
+
+    /// The `Retrieval` record with this id, by index lookup. `None` if it
+    /// was never written here or has been pruned.
+    pub fn find_retrieval(&self, retrieval_id: Uuid) -> Result<Option<Record>, LedgerError> {
+        self.retrievals.find_retrieval(retrieval_id)
+    }
+
+    /// The seq the next retrieval gets. Grows for the life of the chain;
+    /// pruning never renumbers.
+    pub fn retrievals_head(&self) -> Result<u64, LedgerError> {
+        self.retrievals.head()
+    }
+
+    /// The oldest retrieval still present: where `verify_retrievals` starts
+    /// and the earliest search `explain` can still answer for.
+    pub fn retrievals_first_seq(&self) -> Result<Option<u64>, LedgerError> {
+        self.retrievals.first_seq()
+    }
+
+    /// Streams retrievals-chain records from `seq` (inclusive) to its head.
+    pub fn scan_retrievals_from(&self, seq: u64) -> Result<impl Iterator<Item = Result<Record, LedgerError>>, LedgerError> {
+        self.retrievals.scan_from(seq)
+    }
+
+    /// Verifies the retrievals chain over everything still present: from
+    /// the genesis if nothing was ever pruned, otherwise from the oldest
+    /// retained record, whose own `prev_hash` commits to what came before.
+    pub fn verify_retrievals(&self) -> Result<(), VerifyError> {
+        self.retrievals.verify()
+    }
+
+    /// Verifies the retrievals chain from `seq` onward.
+    pub fn verify_retrievals_from(&self, seq: u64) -> Result<(), VerifyError> {
+        self.retrievals.verify_from(seq)
+    }
+
+    /// Drops retrievals recorded before `cutoff` from the front of the
+    /// retrievals chain, always keeping the newest record as the anchor.
+    /// Pruned searches can no longer be explained; the chain still verifies
+    /// from the first record kept. Facts are never pruned.
+    pub fn prune_retrievals_before(&self, cutoff: DateTime<Utc>) -> Result<PruneOutcome, LedgerError> {
+        self.retrievals.prune_before(cutoff)
     }
 }
 
@@ -295,6 +480,15 @@ pub struct WriteSupersedeOutcome {
 pub struct WriteEraseOutcome {
     pub target_seq: u64,
     pub erase_seq: u64,
+}
+
+/// What `prune_retrievals_before` did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PruneOutcome {
+    pub pruned: u64,
+    /// The oldest retained seq afterwards, where verification now starts.
+    /// `None` only for a chain that was empty to begin with.
+    pub first_seq: Option<u64>,
 }
 
 #[derive(Debug, thiserror::Error)]

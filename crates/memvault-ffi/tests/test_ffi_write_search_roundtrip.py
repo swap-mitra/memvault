@@ -108,6 +108,26 @@ def test_invalid_input_raises_rather_than_panics():
             raise AssertionError("a wrong-dimension embedding should raise MemVaultError")
 
 
+def test_config_file_sets_the_content_limit_and_retention():
+    with tempfile.TemporaryDirectory() as data_dir:
+        with open(f"{data_dir}/memvault.toml", "w", encoding="utf-8") as f:
+            f.write("[limits]\nmax_content_bytes = 16\n\n[retrievals]\nkeep_days = 0\n")
+        mv = memvault.MemVault(data_dir)
+        mv.write(NS, "short enough")
+        try:
+            mv.write(NS, "x" * 17)
+        except memvault.MemVaultError:
+            pass
+        else:
+            raise AssertionError("content over [limits] max_content_bytes should be refused")
+
+        for _ in range(3):
+            mv.search(NS, "short")
+        # keep_days = 0 from the config: everything older than now goes, the newest stays.
+        assert mv.prune_retrievals() == 2
+        mv.verify()
+
+
 def test_embedding_dim_is_fixed_at_creation():
     with tempfile.TemporaryDirectory() as data_dir:
         mv = memvault.MemVault(data_dir, embedding_dim=4)

@@ -25,6 +25,7 @@ pub(crate) use redb_error;
 pub mod bitemporal;
 pub mod budget;
 pub mod chain;
+pub mod config;
 pub mod crypto;
 pub mod decay;
 pub mod embedding;
@@ -51,14 +52,26 @@ mod read_path_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]
+mod retrievals_tests;
+#[cfg(test)]
 mod write_path_tests;
 
+/// Everything a data directory opens to: the two chains behind `ledger`,
+/// the keyring, both indexes, and `memvault.toml`.
+pub struct Stores {
+    pub ledger: Ledger,
+    pub keyring: Keyring,
+    pub indexes: Indexes,
+    pub config: Config,
+}
+
 /// Opens (creating if absent) the ledger, keyring and both indexes that make
-/// up a MemVault data directory. Every surface -- CLI, MCP server, FFI,
-/// benchmarks -- needs exactly these four over exactly this layout, and a
-/// second opinion about the file names would be a data-corrupting one.
-/// Recovery is the caller's next step, not this function's: the CLI defers
-/// it to an explicit `replay`, the servers run it at startup.
+/// up a MemVault data directory, and reads its `memvault.toml`. Every
+/// surface -- CLI, MCP server, FFI, benchmarks -- needs exactly these over
+/// exactly this layout, and a second opinion about the file names would be
+/// a data-corrupting one. Recovery is the caller's next step, not this
+/// function's: the CLI defers it to an explicit `replay`, the servers run
+/// it at startup.
 ///
 /// `requested` is the embedding fingerprint a *new* directory should get;
 /// `None` means `default_fingerprint()`. An existing directory keeps the
@@ -69,8 +82,9 @@ mod write_path_tests;
 pub fn open_stores(
     data_dir: &std::path::Path,
     requested: Option<&ModelFingerprint>,
-) -> Result<(Ledger, Keyring, Indexes), Box<dyn std::error::Error>> {
+) -> Result<Stores, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(data_dir)?;
+    let config = Config::load(data_dir)?;
     let ledger = Ledger::open(&data_dir.join("ledger.redb"))?;
     let keyring = Keyring::open(&data_dir.join("keys.redb"))?;
     let vector = VectorIndex::open_or_create(&data_dir.join("vectors.usearch"), requested.unwrap_or(&default_fingerprint()))?;
@@ -86,7 +100,7 @@ pub fn open_stores(
         }
     }
     let keyword = KeywordIndex::open_or_create(&data_dir.join("keyword"))?;
-    Ok((ledger, keyring, Indexes { vector, keyword }))
+    Ok(Stores { ledger, keyring, indexes: Indexes { vector, keyword }, config })
 }
 
 /// Locks `mutex`, taking the guard back if a previous holder panicked. A
@@ -116,13 +130,14 @@ mod lock_tests {
 pub use bitemporal::{get_fact, memory_as_of, AsOfError, AsOfFact, AsOfQuery};
 pub use budget::{pack_to_budget, PricedCandidate};
 pub use chain::{record_hash, verify_chain_from, ChainError};
+pub use config::{Config, ConfigError, DecayOverride, DecaySection, Limits, Retention, CONFIG_FILE};
 pub use crypto::{content_hash, DecryptError, Keyring, KeyringError};
 pub use decay::{apply_decay, decay_weight, DecayConfig, ScoredCandidate};
 pub use embedding::{placeholder_embedding, PLACEHOLDER_EMBEDDING_NAME};
 pub use erase::{erase, EraseError};
 pub use explain::{explain, explanation_row, injected_contents, outcome_cell, search, ExplainError, InjectedFact, EXPLANATION_HEADER};
 pub use index::{IndexError, Indexes, KeywordIndex, VectorIndex};
-pub use ledger::{Ledger, LedgerError, VerifyError, WriteAssertOutcome, WriteEraseOutcome, WriteSupersedeOutcome};
+pub use ledger::{Ledger, LedgerError, PruneOutcome, VerifyError, WriteAssertOutcome, WriteEraseOutcome, WriteSupersedeOutcome, RETRIEVALS_FILE};
 pub use read_path::{hybrid_search, FusedCandidate, Query, SearchError};
 pub use recovery::{recover, IndexKind, RecoveryConfig, RecoveryError, RecoveryReport};
 pub use record::{
@@ -130,4 +145,4 @@ pub use record::{
     ModelFingerprint, NamespaceId, Outcome, Payload, Record, RecordHeader, RecordKind, Retrieval,
     SourceRef, Supersede,
 };
-pub use write_path::{supersede_fact, write_fact, SupersedeError, WriteError, WriteInput};
+pub use write_path::{supersede_fact, write_fact, write_fact_with_limit, SupersedeError, WriteError, WriteInput, DEFAULT_MAX_CONTENT_BYTES};

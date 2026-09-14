@@ -1,5 +1,6 @@
 use uuid::Uuid;
 
+use crate::decay::DecayConfig;
 use crate::read_path::{hybrid_search, Query, SearchError};
 use crate::record::{ModelFingerprint, NamespaceId};
 use crate::test_support::harness;
@@ -13,6 +14,7 @@ fn base_query() -> Query {
         as_of: None,
         k: 10,
         max_tokens: 4096,
+        decay: DecayConfig::default(),
     }
 }
 
