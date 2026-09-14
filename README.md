@@ -3,7 +3,7 @@
 # MemVault
 
 **A local-first memory engine for AI agents.**
-One binary, no service to operate, no network required.
+One binary, no service to operate, no network unless you ask for one.
 
 **[swap-mitra.github.io/memvault](https://swap-mitra.github.io/memvault/)**
 
@@ -13,12 +13,15 @@ One binary, no service to operate, no network required.
 ![rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-b7410e?logo=rust&logoColor=white)
 ![license MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)
 
-[Quickstarts](#quickstart-1--the-cli-in-about-a-minute) ·
+[Install](#install) ·
+[CLI](#quickstart-1--the-cli-in-about-a-minute) ·
 [MCP setup](#quickstart-2--connect-it-to-an-mcp-client) ·
 [Python](#quickstart-3--python-in-process) ·
 [Accountability](#proving-the-accountability-claims) ·
+[Operating it](#operating-it) ·
+[Limits](#known-limits) ·
 [Benchmarks](#benchmarks) ·
-[Limits](#known-limits)
+[Changelog](CHANGELOG.md)
 
 </div>
 
@@ -56,38 +59,52 @@ flowchart LR
 
 ---
 
-## Requirements
+## Install
 
-Prebuilt `memvault` and `memvault-server` binaries for Linux x86_64, macOS
-(Intel and Apple silicon), and Windows x86_64 are attached to every tagged
-[release](https://github.com/swap-mitra/memvault/releases). Download, unpack,
-and skip to a quickstart; nothing below is needed.
+Every tagged [release](https://github.com/swap-mitra/memvault/releases)
+carries prebuilt binaries and Python wheels for Linux x86_64, macOS (Intel
+and Apple silicon), and Windows x86_64, with a `SHA256SUMS` file.
 
-To build from source instead:
+**Binaries.** Download the archive for your platform and unpack it. It holds
+the two programs, the README, and both licenses; put the directory on your
+`PATH` or call them by path. Nothing else to install: no database to
+provision, no service to keep alive.
 
-| | |
+| Binary | What it is |
 |---|---|
-| **Rust 1.85+** | The workspace uses edition 2024. `rustup update` if `cargo build` complains about the edition. |
-| **A C++ toolchain** | The vector index (`usearch`) builds from source. Xcode command line tools on macOS, `build-essential` on Debian/Ubuntu, Visual Studio Build Tools on Windows. |
-| **Python 3.9+** | Only if you want the Python bindings. |
+| `memvault` | CLI: `write`, `search`, `get`, `explain`, `as-of`, `supersede`, `forget`, `verify`, `replay`, `mcp-config` |
+| `memvault-server` | MCP server over stdio, for agents to talk to |
 
-Nothing else. No database to provision, no service to keep alive.
+**Python.** Download the wheel for your platform from the same release and
+install the file, for example:
+
+```sh
+pip install https://github.com/swap-mitra/memvault/releases/download/v0.1.0/memvault-0.1.0-cp39-abi3-manylinux_2_28_x86_64.whl
+```
+
+The wheel is abi3, so one file covers CPython 3.9 and later. Publishing to
+PyPI is set up in the release workflow but not yet enabled, so `pip install
+memvault` on its own does not work today.
+
+**From source.** Rust 1.85+ (edition 2024; `rustup update` if `cargo build`
+complains) and a C++ toolchain, because the vector index (`usearch`) builds
+from source: Xcode command line tools on macOS, `build-essential` on
+Debian/Ubuntu, Visual Studio Build Tools on Windows. Python 3.9+ and
+`maturin` only if you want the bindings.
 
 ```sh
 git clone https://github.com/swap-mitra/memvault
 cd memvault
-cargo build --release
+cargo build --release                                        # -> target/release/memvault, memvault-server
+pip install maturin && maturin build --release -m crates/memvault-ffi/Cargo.toml
+pip install --find-links target/wheels memvault              # the Python bindings
 ```
 
-That produces two binaries in `target/release/`:
+Add `--features tokenizer` to `cargo build` for real token counts instead of
+the byte estimate (see [Known limits](#known-limits)).
 
-| Binary | What it is |
-|---|---|
-| `memvault` | CLI — write, search, explain, verify, forget |
-| `memvault-server` | MCP server over stdio, for agents to talk to |
-
-The examples below use `./target/release/memvault`. Put it on your `PATH` if
-you'd rather not type that.
+The examples below write `memvault`; use `./target/release/memvault` or the
+unpacked path if it is not on your `PATH`.
 
 ---
 
@@ -124,9 +141,13 @@ fact_id                              ann_rank   ann_dist  bm25_rk bm25_score    
 34e2001b-1603-45c5-abbe-f5fbcf31d4a8        0     0.3518        0     2.2232    0.0328    1.0000    0.0328      Injected     15
 fdaa5149-440e-4a42-b2e6-d67653f2871d        1     0.6311        -          -    0.0161    1.0000    0.0161   CutByBudget     17
 b5aa16a8-aa14-48cb-917d-1bc5d048f184        2     1.0000        -          -    0.0159    1.0000    0.0159   CutByBudget     11
+injected:
+  34e2001b-1603-45c5-abbe-f5fbcf31d4a8  the deploy script lives in ops/deploy.sh
 ```
 
-That table is the point of the product, so it is worth reading across:
+The `injected:` block underneath is what an agent would put in context. The
+table above it is why, and it is the point of the product, so it is worth
+reading across:
 
 | Column | Meaning |
 |---|---|
@@ -255,7 +276,7 @@ proc.terminate()
 ```
 
 ```console
-memvault-server: recovery report: RecoveryReport { replayed_from: None, rebuilt: [], verified: true } (32 dimensions)
+memvault-server: recovery report: RecoveryReport { replayed_from: None, rebuilt: [], verified: true } (32 dimensions, embeddings caller-supplied)
 {'fact_id': '408d7030-e08b-488d-ba9a-c03f43005a2d'}
 {
   "candidates": [
@@ -289,8 +310,8 @@ that output surprise people:
 
 **That first line is not an error.** The server reports what recovery found
 on stderr every time it starts; `verified: true` means the chain checked out,
-and the width in parentheses is the embedding size this directory accepts.
-Only stdout carries protocol traffic.
+and the parenthesis says what embedding width this directory accepts and
+where its vectors come from. Only stdout carries protocol traffic.
 
 **Read each response before sending the next request.** The server handles
 requests concurrently, so a script that pipes every line in at once can have
@@ -312,13 +333,8 @@ because it generates a stand-in vector; see [Known limits](#known-limits).
 ## Quickstart 3 — Python, in-process
 
 For callers who want the engine in the same process, with no subprocess and
-no event loop:
-
-```sh
-pip install maturin
-maturin build -m crates/memvault-ffi/Cargo.toml --release
-pip install --find-links target/wheels memvault
-```
+no event loop. Install the wheel as described under [Install](#install),
+then:
 
 ```python
 import memvault
@@ -342,7 +358,9 @@ mv.verify()  # raises if the chain is broken
 
 The API is synchronous, and every call releases the GIL while the engine
 works. `Explanation` carries the same fields as the table above, so
-provenance doesn't get thinner just because you came in this way.
+provenance doesn't get thinner just because you came in this way. The
+embedding provider is a server feature; in-process callers embed with their
+own model and pass the vectors in, as above.
 
 ---
 
@@ -412,12 +430,46 @@ cargo build -p memvault-server --features grpc
 MEMVAULT_GRPC_ADDR=127.0.0.1:50051 ./target/debug/memvault-server ./my-memory
 ```
 
-Same six operations, structured messages instead of text. The schema is
+The same seven operations as the MCP tools, as protobuf messages with the
+same shapes as the tools' JSON. The schema is
 `crates/memvault-server/proto/memvault.proto`. A default build rejects
 `MEMVAULT_GRPC_ADDR` rather than ignoring it, so a half-configured deployment
 fails at startup instead of quietly serving the wrong thing.
 
 </details>
+
+---
+
+## Operating it
+
+A data directory is a handful of files you own, and the rules for looking
+after it are short.
+
+| | |
+|---|---|
+| `ledger.redb` | The hash-chained ledger: every fact, supersession, erase and retrieval, encrypted content included. The only file that is the truth. |
+| `keys.redb` | One key per fact. `forget` deletes a key here; that is the whole erase. |
+| `vectors.usearch`, `vectors.usearch.meta.redb`, `keyword/`, `keyword.watermark` | Derived indexes. Deletable; `memvault replay` (or any server start) rebuilds them from the ledger. |
+
+**Back it up stopped.** The ledger takes an exclusive file lock while a
+process has it open, so a second opener fails rather than reading a half-
+written state; the same lock means a copy taken while the server runs may
+catch an index file mid-write. Stop the server, copy the directory, start
+it again. If the copy is ever inconsistent, `replay` fixes the indexes; the
+ledger itself is append-only and verified on every open.
+
+**`keys.redb` is the one file you cannot regenerate.** Lose it and every
+fact becomes permanently unreadable, though the chain still verifies and
+the `content_hash` on each record still proves what it once said. Back it
+up with the ledger, and protect it like the plaintext it unlocks.
+
+**Erase is only as strong as your backups.** A backup taken before a
+`forget` still holds that fact's key. If provable forgetting matters to you,
+your retention policy for backups is part of it.
+
+**Upgrading.** Pre-1.0, the on-disk format may change between minor
+versions. [CHANGELOG.md](CHANGELOG.md) says when it does; until then, a
+newer binary opens an older directory unchanged.
 
 ---
 
@@ -431,6 +483,7 @@ Stated plainly, because each one will otherwise look like a bug.
 | **Namespaces isolate results, but share one candidate pool** | A search never returns another namespace's facts. It does draw candidates from indexes shared across the whole data directory and filter afterwards, so a namespace holding far more facts than its neighbours can crowd them out of that pool and cost them recall. Nothing leaks either way; a very lopsided multi-tenant directory is still better off with a `--data-dir` per tenant. |
 | **Token counts are estimates by default** | Ciphertext bytes / 4, not a tokenizer. Close enough for budgeting English prose, drifting on code. Build with `--features tokenizer` and the `tokens` column becomes a real cl100k_base count of the decrypted content; the vocabulary is compiled in and no model runs. |
 | **Decay measures from a fact's own start** | Not from last access — so retrieval does not yet reinforce a fact against decay. |
+| **Every search appends to the ledger** | The Retrieval record that makes `explain` possible is a ledger write, so the chain grows with reads as well as writes, and `verify` and `explain` walk all of it. There is no compaction or checkpointing yet. An agent that searches on every turn will notice `verify` slowing over months, not days; `memvault verify --from <seq>` bounds it in the meantime. |
 
 ---
 
@@ -522,9 +575,7 @@ out in the shape each benchmark's own scripts consume. Generation and judging
 stay with the benchmark, which is what "run unmodified" means.
 
 ```sh
-maturin build -m crates/memvault-ffi/Cargo.toml --release
-pip install --find-links target/wheels memvault
-
+# the Python bindings, installed as under Install
 python benchmarks/longmemeval.py longmemeval_s.json --out lme_retrievals.jsonl
 python benchmarks/locomo.py       locomo10.json      --out locomo_retrievals.jsonl
 ```
@@ -559,7 +610,8 @@ crates/
   memvault-bench/    latency, verification, and rebuild benchmarks
 benchmarks/          LongMemEval and LOCOMO harnesses
 demo/                narrated end-to-end demo scripts
-docs/                product doc and implementation plan
+docs/                the landing page (served by GitHub Pages), product doc, implementation plan
+.github/workflows/   ci (tests + demos), wheels, release (binaries on a tag), benchmarks
 ```
 
 ## License

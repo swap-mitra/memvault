@@ -1144,7 +1144,7 @@ MEMVAULT_GRPC_ADDR=127.0.0.1:50051 \
               </div>
               <p>
                 Off by default, for multi-process deployments where stdio is not
-                available. The same six operations, as protobuf messages
+                available. The same seven operations, as protobuf messages
                 with the same shapes as the MCP tools&rsquo; JSON; the schema is
                 <code>crates/memvault-server/proto/memvault.proto</code>. A
                 default build <em>rejects</em> <code>MEMVAULT_GRPC_ADDR</code>
@@ -1165,9 +1165,8 @@ MEMVAULT_GRPC_ADDR=127.0.0.1:50051 \
                   copy
                 </button>
                 <pre tabindex="0">
-pip install maturin
-maturin build -m crates/memvault-ffi/Cargo.toml --release
-pip install --find-links target/wheels memvault</pre>
+<span class="cm"># a wheel for each platform is attached to every release</span>
+pip install https://github.com/swap-mitra/memvault/releases/download/v0.1.0/memvault-0.1.0-cp39-abi3-manylinux_2_28_x86_64.whl</pre>
               </div>
               <div class="cmd">
                 <button type="button" class="copy" aria-live="polite" hidden>
@@ -1397,7 +1396,9 @@ Install MemVault as an MCP server for this project.
 
 Prerequisites, check both before you start and stop if either is missing:
 Rust 1.85 or newer (the workspace is edition 2024), and a C++ toolchain,
-because the vector index builds from source.
+because the vector index builds from source. (If either is missing, the
+release page at https://github.com/swap-mitra/memvault/releases has a
+prebuilt archive per platform; unpack it and skip step 1.)
 
 1. git clone https://github.com/swap-mitra/memvault
    cd memvault
@@ -1479,6 +1480,14 @@ because the vector index builds from source.
                 <td>
                   Not from last access, so retrieval does not yet reinforce a
                   fact against decay.
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Every search appends to the ledger</th>
+                <td>
+                  The Retrieval record behind <code>explain</code> is a ledger
+                  write, so the chain grows with reads too, and there is no
+                  compaction yet.
                 </td>
               </tr>
             </tbody>
