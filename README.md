@@ -58,6 +58,13 @@ flowchart LR
 
 ## Requirements
 
+Prebuilt `memvault` and `memvault-server` binaries for Linux x86_64, macOS
+(Intel and Apple silicon), and Windows x86_64 are attached to every tagged
+[release](https://github.com/swap-mitra/memvault/releases). Download, unpack,
+and skip to a quickstart; nothing below is needed.
+
+To build from source instead:
+
 | | |
 |---|---|
 | **Rust 1.85+** | The workspace uses edition 2024. `rustup update` if `cargo build` complains about the edition. |
