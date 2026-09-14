@@ -59,11 +59,32 @@ mod write_path_tests;
 /// second opinion about the file names would be a data-corrupting one.
 /// Recovery is the caller's next step, not this function's: the CLI defers
 /// it to an explicit `replay`, the servers run it at startup.
-pub fn open_stores(data_dir: &std::path::Path) -> Result<(Ledger, Keyring, Indexes), Box<dyn std::error::Error>> {
+///
+/// `requested` is the embedding fingerprint a *new* directory should get;
+/// `None` means `default_fingerprint()`. An existing directory keeps the
+/// fingerprint it was created with (read back from the vector index's
+/// sidecar), and a `requested` width that disagrees with it is an error
+/// rather than a silently mismatched index. Callers take
+/// `indexes.vector.fingerprint()` as the truth from here on.
+pub fn open_stores(
+    data_dir: &std::path::Path,
+    requested: Option<&ModelFingerprint>,
+) -> Result<(Ledger, Keyring, Indexes), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(data_dir)?;
     let ledger = Ledger::open(&data_dir.join("ledger.redb"))?;
     let keyring = Keyring::open(&data_dir.join("keys.redb"))?;
-    let vector = VectorIndex::open_or_create(&data_dir.join("vectors.usearch"), &default_fingerprint())?;
+    let vector = VectorIndex::open_or_create(&data_dir.join("vectors.usearch"), requested.unwrap_or(&default_fingerprint()))?;
+    if let Some(requested) = requested {
+        if vector.fingerprint().dimensions != requested.dimensions {
+            return Err(format!(
+                "requested {} embedding dimensions, but {} already holds {}-dimensional embeddings",
+                requested.dimensions,
+                data_dir.display(),
+                vector.fingerprint().dimensions
+            )
+            .into());
+        }
+    }
     let keyword = KeywordIndex::open_or_create(&data_dir.join("keyword"))?;
     Ok((ledger, keyring, Indexes { vector, keyword }))
 }
@@ -75,7 +96,7 @@ pub use crypto::{content_hash, DecryptError, Keyring, KeyringError};
 pub use decay::{apply_decay, decay_weight, DecayConfig, ScoredCandidate};
 pub use embedding::{placeholder_embedding, PLACEHOLDER_EMBEDDING_NAME};
 pub use erase::{erase, EraseError};
-pub use explain::{explain, explanation_row, outcome_cell, search, ExplainError, EXPLANATION_HEADER};
+pub use explain::{explain, explanation_row, injected_contents, outcome_cell, search, ExplainError, InjectedFact, EXPLANATION_HEADER};
 pub use index::{IndexError, Indexes, KeywordIndex, VectorIndex};
 pub use ledger::{Ledger, LedgerError, VerifyError, WriteAssertOutcome, WriteEraseOutcome, WriteSupersedeOutcome};
 pub use read_path::{hybrid_search, FusedCandidate, Query, SearchError};

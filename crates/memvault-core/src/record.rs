@@ -26,23 +26,29 @@ pub struct ModelFingerprint {
     pub revision_hash: [u8; 32],
 }
 
-/// ponytail: no namespace config loader exists yet, so there is no real
-/// per-namespace embedding model -- every caller that doesn't bring its
-/// own fingerprint shares this one placeholder. Previously each of
-/// memvault-cli and memvault-server hardcoded their own (32 and 1536
-/// dimensions respectively), which silently broke the moment both were
-/// pointed at the same data directory: recovery's fingerprint-mismatch
-/// check saw two different "placeholder" fingerprints, reset the vector
-/// index to the wrong dimensionality, and the next replayed insert of an
-/// actually-32-dimensional embedding failed outright. One shared default
-/// closes that gap by construction. Upgrade path: read this from
-/// namespace config once that loader exists.
-pub fn default_fingerprint() -> ModelFingerprint {
-    ModelFingerprint {
-        name: "caller-supplied".into(),
-        dimensions: 32,
-        revision_hash: [0u8; 32],
+impl ModelFingerprint {
+    /// The fingerprint for a data directory whose embeddings come from
+    /// outside the engine: MemVault knows their width and nothing else.
+    /// A data directory's width is fixed when its vector index is first
+    /// created and read back from the index's sidecar on every later open,
+    /// so surfaces pass this only to *create* an index and then take
+    /// `VectorIndex::fingerprint()` as the truth for writes and recovery.
+    pub fn caller_supplied(dimensions: u32) -> ModelFingerprint {
+        ModelFingerprint {
+            name: "caller-supplied".into(),
+            dimensions,
+            revision_hash: [0u8; 32],
+        }
     }
+}
+
+/// The width a brand-new data directory gets when nobody asked for one:
+/// what the CLI's hashed-trigram placeholder needs. Any real model wants
+/// more (`MEMVAULT_EMBEDDING_DIM` on the server, `embedding_dim=` in
+/// Python), and once an index exists its stored fingerprint wins over
+/// this.
+pub fn default_fingerprint() -> ModelFingerprint {
+    ModelFingerprint::caller_supplied(32)
 }
 
 /// Opaque caller-supplied provenance. MemVault stores and returns it

@@ -9,22 +9,23 @@
 //! it must say so. Upgrade path: callers supply real embeddings, which the
 //! engine already accepts everywhere.
 
-use crate::record::default_fingerprint;
-
 /// What to call this when naming the model behind a published measurement.
 pub const PLACEHOLDER_EMBEDDING_NAME: &str = "hashed-trigram placeholder (not a semantic model)";
 
-pub fn placeholder_embedding(text: &str) -> Vec<f32> {
-    let mut v = vec![0f32; default_fingerprint().dimensions as usize];
+/// `dimensions` is the opened vector index's width (its fingerprint's), so
+/// the stand-in fits whatever the data directory was created with.
+pub fn placeholder_embedding(text: &str, dimensions: u32) -> Vec<f32> {
+    let mut v = vec![0f32; dimensions as usize];
     let bytes = text.as_bytes();
-    if bytes.is_empty() {
+    if bytes.is_empty() || v.is_empty() {
         return v;
     }
     let window_len = 3.min(bytes.len());
     for window in bytes.windows(window_len) {
         let h = blake3::hash(window);
         let raw = h.as_bytes();
-        let bucket = (raw[0] as usize) % v.len();
+        // Two hash bytes, so widths past 256 still use every bucket.
+        let bucket = u16::from_le_bytes([raw[0], raw[2]]) as usize % v.len();
         let sign = if raw[1] % 2 == 0 { 1.0 } else { -1.0 };
         v[bucket] += sign;
     }

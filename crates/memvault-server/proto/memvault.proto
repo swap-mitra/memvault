@@ -3,8 +3,8 @@ syntax = "proto3";
 package memvault.v1;
 
 // The same six operations the MCP server exposes (product doc §6.8), for
-// multi-process deployments where stdio isn't available. Unlike the MCP
-// tools, which return text an agent reads, these return structured messages.
+// multi-process deployments where stdio isn't available. The MCP tools
+// return the same shapes as JSON.
 service Memory {
   rpc Write(WriteRequest) returns (WriteResponse);
   rpc Search(SearchRequest) returns (SearchResponse);
@@ -23,6 +23,12 @@ message WriteRequest {
   // Supersedes this fact's open version instead of asserting a new one.
   optional string fact_id = 5;
   repeated string keywords = 6;
+  // RFC 3339. When the fact became / stopped being true. Omit valid_from
+  // for now, valid_to for an open interval.
+  optional string valid_from = 7;
+  optional string valid_to = 8;
+  // Opaque provenance, stored and returned untouched.
+  optional string source = 9;
 }
 
 message WriteResponse {
@@ -54,9 +60,18 @@ message Explanation {
   uint32 token_cost = 11;
 }
 
+// The text of a fact that made it into the answer.
+message InjectedFact {
+  string fact_id = 1;
+  string content = 2;
+}
+
 message SearchResponse {
   string retrieval_id = 1;
   repeated Explanation explanations = 2;
+  // What to put in context, best first: the Injected candidates' content.
+  // Empty from Explain, which replays scores, never content.
+  repeated InjectedFact injected = 3;
 }
 
 message AsOfRequest {

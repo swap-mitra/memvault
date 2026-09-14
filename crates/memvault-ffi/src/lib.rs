@@ -18,9 +18,9 @@ use pyo3::prelude::*;
 use uuid::Uuid;
 
 use memvault_core::{
-    default_fingerprint, erase, explain as core_explain, memory_as_of, open_stores, recover,
-    search as core_search, supersede_fact, write_fact, AsOfQuery,
-    Explanation as CoreExplanation, Indexes, Keyring, Ledger, NamespaceId, Query, RecoveryConfig,
+    erase, explain as core_explain, injected_contents, memory_as_of, open_stores, recover,
+    search as core_search, supersede_fact, write_fact, AsOfQuery, Explanation as CoreExplanation,
+    Indexes, InjectedFact, Keyring, Ledger, ModelFingerprint, NamespaceId, Query, RecoveryConfig,
     SourceRef, WriteInput,
 };
 
@@ -78,6 +78,49 @@ impl PyExplanation {
     }
 }
 
+/// The text of a fact that made it into a search's answer.
+#[pyclass(name = "Injected", get_all, frozen, skip_from_py_object)]
+#[derive(Clone)]
+struct PyInjected {
+    fact_id: String,
+    content: String,
+}
+
+impl From<&InjectedFact> for PyInjected {
+    fn from(f: &InjectedFact) -> Self {
+        PyInjected { fact_id: f.fact_id.to_string(), content: String::from_utf8_lossy(&f.content).into_owned() }
+    }
+}
+
+#[pymethods]
+impl PyInjected {
+    fn __repr__(&self) -> String {
+        format!("Injected(fact_id={}, content={:?})", self.fact_id, self.content)
+    }
+}
+
+/// One search: what to put in context, and why.
+#[pyclass(name = "SearchResult", get_all, frozen, skip_from_py_object)]
+struct PySearchResult {
+    retrieval_id: String,
+    /// `Injected` candidates' content, best first.
+    injected: Vec<PyInjected>,
+    /// Every candidate considered, the cut ones included.
+    candidates: Vec<PyExplanation>,
+}
+
+#[pymethods]
+impl PySearchResult {
+    fn __repr__(&self) -> String {
+        format!(
+            "SearchResult(retrieval_id={}, injected={}, candidates={})",
+            self.retrieval_id,
+            self.injected.len(),
+            self.candidates.len()
+        )
+    }
+}
+
 /// A fact as it stood at some point on both time axes.
 #[pyclass(name = "Fact", get_all, frozen, skip_from_py_object)]
 #[derive(Clone)]
@@ -99,6 +142,9 @@ struct Stores {
     ledger: Ledger,
     keyring: Keyring,
     indexes: Indexes,
+    /// The data directory's embedding fingerprint, read from the vector
+    /// index once at open: what every write is validated against.
+    fingerprint: ModelFingerprint,
 }
 
 /// An open MemVault data directory. Cheap to keep alive for the life of the
@@ -135,22 +181,32 @@ impl PyMemVault {
     /// Open (creating if absent) the ledger, keyring, and indexes under
     /// `data_dir`, running recovery first so a crashed previous process
     /// leaves no divergence behind.
+    ///
+    /// `embedding_dim` is the width your embedding model produces. It is
+    /// fixed when the directory is first created; pass it again later or
+    /// leave it out, but a different value is refused.
     #[new]
-    fn new(py: Python<'_>, data_dir: PathBuf) -> PyResult<Self> {
+    #[pyo3(signature = (data_dir, *, embedding_dim=None))]
+    fn new(py: Python<'_>, data_dir: PathBuf, embedding_dim: Option<u32>) -> PyResult<Self> {
+        if embedding_dim == Some(0) {
+            return Err(PyValueError::new_err("embedding_dim must be at least 1"));
+        }
         py.detach(|| {
-            let (ledger, keyring, mut indexes) = open_stores(&data_dir).map_err(engine_err)?;
+            let requested = embedding_dim.map(ModelFingerprint::caller_supplied);
+            let (ledger, keyring, mut indexes) = open_stores(&data_dir, requested.as_ref()).map_err(engine_err)?;
+            let fingerprint = indexes.vector.fingerprint().clone();
 
-            recover(
-                &ledger,
-                &mut indexes,
-                &keyring,
-                &default_fingerprint(),
-                RecoveryConfig { verify_chain: true },
-            )
-            .map_err(engine_err)?;
+            recover(&ledger, &mut indexes, &keyring, &fingerprint, RecoveryConfig { verify_chain: true })
+                .map_err(engine_err)?;
 
-            Ok(PyMemVault { stores: Mutex::new(Stores { ledger, keyring, indexes }) })
+            Ok(PyMemVault { stores: Mutex::new(Stores { ledger, keyring, indexes, fingerprint }) })
         })
+    }
+
+    /// The embedding width this data directory was created with.
+    #[getter]
+    fn embedding_dim(&self) -> u32 {
+        self.stores.lock().unwrap().fingerprint.dimensions
     }
 
     /// Assert a fact. Passing `fact_id` supersedes that fact's currently-open
@@ -176,7 +232,7 @@ impl PyMemVault {
 
         py.detach(|| {
             let mut stores = self.stores.lock().unwrap();
-            let Stores { ledger, keyring, indexes } = &mut *stores;
+            let Stores { ledger, keyring, indexes, fingerprint } = &mut *stores;
             write_fact(
                 ledger,
                 indexes,
@@ -185,7 +241,7 @@ impl PyMemVault {
                     namespace: NamespaceId(namespace),
                     content: content.into_bytes(),
                     embedding,
-                    embedding_model: default_fingerprint(),
+                    embedding_model: fingerprint.clone(),
                     valid_from,
                     valid_to,
                     fact_id,
@@ -199,8 +255,9 @@ impl PyMemVault {
         })
     }
 
-    /// Hybrid search. Returns `(retrieval_id, [Explanation, ...])` covering
-    /// every candidate considered, cut ones included.
+    /// Hybrid search. Returns a `SearchResult`: the injected facts' content
+    /// (best first) plus an `Explanation` for every candidate considered,
+    /// cut ones included.
     #[pyo3(signature = (namespace, query=None, *, embedding=None, k=10, max_tokens=2048))]
     fn search(
         &self,
@@ -210,7 +267,7 @@ impl PyMemVault {
         embedding: Option<Vec<f32>>,
         k: usize,
         max_tokens: u32,
-    ) -> PyResult<(String, Vec<PyExplanation>)> {
+    ) -> PyResult<PySearchResult> {
         py.detach(|| {
             let stores = self.stores.lock().unwrap();
             let (explanations, retrieval_id) = core_search(
@@ -227,7 +284,12 @@ impl PyMemVault {
                 },
             )
             .map_err(engine_err)?;
-            Ok((retrieval_id.to_string(), explanations.iter().map(PyExplanation::from).collect()))
+            let injected = injected_contents(&stores.ledger, &stores.keyring, &explanations).map_err(engine_err)?;
+            Ok(PySearchResult {
+                retrieval_id: retrieval_id.to_string(),
+                injected: injected.iter().map(PyInjected::from).collect(),
+                candidates: explanations.iter().map(PyExplanation::from).collect(),
+            })
         })
     }
 
@@ -303,7 +365,7 @@ impl PyMemVault {
         let fact_id = parse_uuid("fact_id", fact_id)?;
         py.detach(|| {
             let mut stores = self.stores.lock().unwrap();
-            let Stores { ledger, keyring, indexes } = &mut *stores;
+            let Stores { ledger, keyring, indexes, .. } = &mut *stores;
             erase(ledger, keyring, indexes, fact_id, reason).map_err(engine_err)
         })
     }
@@ -323,6 +385,8 @@ impl PyMemVault {
 fn memvault(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyMemVault>()?;
     m.add_class::<PyExplanation>()?;
+    m.add_class::<PyInjected>()?;
+    m.add_class::<PySearchResult>()?;
     m.add_class::<PyFact>()?;
     m.add("MemVaultError", m.py().get_type::<MemVaultError>())?;
     Ok(())

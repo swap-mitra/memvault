@@ -12,7 +12,7 @@ use clap::{Parser, Subcommand};
 use uuid::Uuid;
 
 use memvault_core::{
-    default_fingerprint, erase, explain, explanation_row, memory_as_of, open_stores, outcome_cell,
+    erase, explain, explanation_row, injected_contents, memory_as_of, open_stores, outcome_cell,
     placeholder_embedding, recover, search, supersede_fact, write_fact, AsOfQuery, Explanation,
     Indexes, Keyring, Ledger, NamespaceId, Outcome, Payload, Query, RecoveryConfig, SourceRef,
     WriteInput, EXPLANATION_HEADER,
@@ -105,8 +105,12 @@ struct Stores {
     indexes: Indexes,
 }
 
+/// The data directory decides its embedding width: the CLI never asks for
+/// one, so a new directory gets the default and an existing one keeps what
+/// it has. The stand-in embeddings are sized to whatever that turns out to
+/// be.
 fn open(data_dir: &Path) -> Result<Stores, Box<dyn std::error::Error>> {
-    let (ledger, keyring, indexes) = open_stores(data_dir)?;
+    let (ledger, keyring, indexes) = open_stores(data_dir, None)?;
     Ok(Stores { ledger, keyring, indexes })
 }
 
@@ -157,7 +161,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         Command::Write { namespace, content, pin, fact_id } => {
             let mut stores = open(&cli.data_dir)?;
-            let embedding = placeholder_embedding(&content);
+            let fingerprint = stores.indexes.vector.fingerprint().clone();
+            let embedding = placeholder_embedding(&content, fingerprint.dimensions);
             let written_id = write_fact(
                 &stores.ledger,
                 &mut stores.indexes,
@@ -166,7 +171,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     namespace: NamespaceId(namespace),
                     content: content.into_bytes(),
                     embedding: Some(embedding),
-                    embedding_model: default_fingerprint(),
+                    embedding_model: fingerprint,
                     valid_from: Utc::now(),
                     valid_to: None,
                     fact_id,
@@ -182,7 +187,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Search { namespace, query, k, max_tokens } => {
             let stores = open(&cli.data_dir)?;
-            let embedding = placeholder_embedding(&query);
+            let embedding = placeholder_embedding(&query, stores.indexes.vector.fingerprint().dimensions);
             let (explanations, retrieval_id) = search(
                 &stores.ledger,
                 &stores.indexes,
@@ -198,6 +203,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             )?;
             println!("retrieval_id: {retrieval_id}");
             print_explanations(&explanations);
+            // Indented so the table rows stay the only lines that start
+            // with a fact_id (demo/run_demo_1.sh counts them that way).
+            let injected = injected_contents(&stores.ledger, &stores.keyring, &explanations)?;
+            if !injected.is_empty() {
+                println!("injected:");
+                for f in &injected {
+                    println!("  {}  {}", f.fact_id, String::from_utf8_lossy(&f.content));
+                }
+            }
         }
         Command::Explain { retrieval_id } => {
             let stores = open(&cli.data_dir)?;
@@ -231,7 +245,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Replay => {
             let mut stores = open(&cli.data_dir)?;
-            let report = recover(&stores.ledger, &mut stores.indexes, &stores.keyring, &default_fingerprint(), RecoveryConfig { verify_chain: true })?;
+            let fingerprint = stores.indexes.vector.fingerprint().clone();
+            let report = recover(&stores.ledger, &mut stores.indexes, &stores.keyring, &fingerprint, RecoveryConfig { verify_chain: true })?;
             println!("{report:?}");
         }
         Command::DumpRecord { seq } => {

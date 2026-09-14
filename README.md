@@ -163,12 +163,26 @@ This is the setup an actual agent uses. Point your MCP client at
 > Use absolute paths for both. The server inherits whatever working directory
 > the client happens to launch it from, which is rarely the one you expect.
 
-Restart the client, and the agent has six tools:
+If your client will pass real embeddings, tell the server their width the
+first time it creates the directory, with an `env` entry next to `args`:
+
+```json
+      "env": { "MEMVAULT_EMBEDDING_DIM": "1536" }
+```
+
+The width is stored in the directory and read back on every later start, so
+you can drop the variable afterwards. A different value against an existing
+directory is refused at startup rather than served wrong. Without it, a new
+directory gets 32 dimensions, which is what the CLI's stand-in vectors need.
+
+Restart the client, and the agent has six tools. Every one answers with
+JSON in `structuredContent` (mirrored as a text block for older clients),
+so the agent reads fields, not columns:
 
 | Tool | What it does |
 |---|---|
-| `memory_write` | Assert a fact. Pass an existing `fact_id` to supersede that fact instead — it has to be one of this namespace's own. |
-| `memory_search` | Hybrid retrieval with the full provenance table above. |
+| `memory_write` | Assert a fact, optionally with `valid_from` / `valid_to` (RFC 3339) and an opaque `source`. Pass an existing `fact_id` to supersede that fact instead — it has to be one of this namespace's own. |
+| `memory_search` | Hybrid retrieval. Returns `injected`, the facts that made it into the answer with their content, best first, plus `candidates`, the full provenance table above as rows. |
 | `memory_as_of` | What was true — or what the engine believed — at a given moment. |
 | `memory_supersede` | Close a fact's interval without asserting a replacement. |
 | `memory_forget` | Cryptographic erase. |
@@ -206,28 +220,52 @@ print(call({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
     "name": "memory_write",
     "arguments": {"namespace": "project",
                   "content": "the deploy script lives in ops/deploy.sh"}}
-})["result"]["content"][0]["text"])
+})["result"]["structuredContent"])
 
-print(call({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+print(json.dumps(call({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
     "name": "memory_search",
     "arguments": {"namespace": "project", "query": "deploy script"}}
-})["result"]["content"][0]["text"])
+})["result"]["structuredContent"], indent=2))
 
 proc.terminate()
 ```
 
 ```console
-memvault-server: recovery report: RecoveryReport { replayed_from: None, rebuilt: [], verified: true }
-fact_id: 77e049f3-bd99-4b7d-b211-1401ccf44a5a
-retrieval_id: a3be11c3-ef33-4851-b50f-80a905ce5cb4
-fact_id                              ann_rank   ann_dist  bm25_rk bm25_score       rrf  decay_wt     final       outcome tokens
-77e049f3-bd99-4b7d-b211-1401ccf44a5a        -          -        0     0.6832    0.0164    1.0000    0.0164      Injected     15
+memvault-server: recovery report: RecoveryReport { replayed_from: None, rebuilt: [], verified: true } (32 dimensions)
+{'fact_id': '408d7030-e08b-488d-ba9a-c03f43005a2d'}
+{
+  "candidates": [
+    {
+      "ann_distance": null,
+      "ann_rank": null,
+      "bm25_rank": 0,
+      "bm25_score": 0.683245062828064,
+      "decay_weight": 1.0,
+      "fact_id": "408d7030-e08b-488d-ba9a-c03f43005a2d",
+      "final_score": 0.016393441706895828,
+      "ledger_seq": 0,
+      "outcome": "Injected",
+      "rrf_score": 0.016393441706895828,
+      "token_cost": 15
+    }
+  ],
+  "injected": [
+    {
+      "content": "the deploy script lives in ops/deploy.sh",
+      "fact_id": "408d7030-e08b-488d-ba9a-c03f43005a2d"
+    }
+  ],
+  "retrieval_id": "bd6fb341-fee5-4b43-8c03-ab3a09e9b61d"
+}
 ```
 
-Three things about that output surprise people:
+`injected` is what the agent puts in context. `candidates` is why, one row
+per fact considered, the same columns as the CLI table. Three things about
+that output surprise people:
 
 **That first line is not an error.** The server reports what recovery found
-on stderr every time it starts; `verified: true` means the chain checked out.
+on stderr every time it starts; `verified: true` means the chain checked out,
+and the width in parentheses is the embedding size this directory accepts.
 Only stdout carries protocol traffic.
 
 **Read each response before sending the next request.** The server handles
@@ -236,11 +274,11 @@ its search answered before its write finishes — and get an empty result that
 looks like a bug. Real MCP clients already wait per response; hand-rolled
 smoke tests are where this bites.
 
-**`ann_rank` is `-` here.** Embeddings are caller-supplied: MemVault runs no
-model, so if your client doesn't pass an `embedding`, only the keyword axis
-runs. That's a working configuration, not a broken one — it is just BM25
-rather than hybrid retrieval. The CLI shows both axes because it generates a
-stand-in vector; see [Known limits](#known-limits).
+**`ann_rank` is `null` here.** Embeddings are caller-supplied: MemVault runs
+no model, so if your client doesn't pass an `embedding`, only the keyword
+axis runs. That's a working configuration, not a broken one — it is just
+BM25 rather than hybrid retrieval. The CLI shows both axes because it
+generates a stand-in vector; see [Known limits](#known-limits).
 
 </details>
 
@@ -260,11 +298,16 @@ pip install --find-links target/wheels memvault
 ```python
 import memvault
 
-mv = memvault.MemVault("./my-memory")
-fact_id = mv.write("project", "the deploy script lives in ops/deploy.sh")
+# embedding_dim is fixed the first time a directory is created and
+# remembered after that; leave it out if you only use keyword search.
+mv = memvault.MemVault("./my-memory", embedding_dim=1536)
+fact_id = mv.write("project", "the deploy script lives in ops/deploy.sh",
+                   embedding=my_model.embed("the deploy script lives in ops/deploy.sh"))
 
-retrieval_id, explanations = mv.search("project", "deploy script")
-for e in explanations:
+result = mv.search("project", "deploy script", embedding=my_model.embed("deploy script"))
+for f in result.injected:          # what goes in context, best first
+    print(f.fact_id, f.content)
+for e in result.candidates:        # why: every candidate considered
     print(e.fact_id, e.outcome, e.final_score, e.token_cost)
 
 mv.verify()  # raises if the chain is broken
@@ -357,7 +400,7 @@ Stated plainly, because each one will otherwise look like a bug.
 
 | Limit | What it means for you |
 |---|---|
-| **Embeddings are caller-supplied** | MemVault runs no model. The MCP and Python surfaces accept an `embedding` and fall back to keyword-only retrieval without one. The CLI and demos hash trigrams into a vector so the fusion machinery has something to run on — that stand-in is *not* semantically meaningful, and no number produced with it should be read as retrieval quality. |
+| **Embeddings are caller-supplied** | MemVault runs no model. The MCP and Python surfaces accept an `embedding` and fall back to keyword-only retrieval without one. A data directory has one embedding width, set when it is created (`MEMVAULT_EMBEDDING_DIM` on the server, `embedding_dim=` in Python, 32 if unsaid) and refused if contradicted later. The CLI and demos hash trigrams into a vector of that width so the fusion machinery has something to run on — that stand-in is *not* semantically meaningful, and no number produced with it should be read as retrieval quality. |
 | **Namespaces isolate results, but share one candidate pool** | A search never returns another namespace's facts. It does draw candidates from indexes shared across the whole data directory and filter afterwards, so a namespace holding far more facts than its neighbours can crowd them out of that pool and cost them recall. Nothing leaks either way; a very lopsided multi-tenant directory is still better off with a `--data-dir` per tenant. |
 | **Token counts are estimates** | Ciphertext bytes / 4, not a tokenizer. Close enough for budgeting English prose, drifting on code. |
 | **Decay measures from a fact's own start** | Not from last access — so retrieval does not yet reinforce a fact against decay. |

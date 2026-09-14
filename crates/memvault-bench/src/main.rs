@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use clap::Parser;
 use memvault_core::{
-    default_fingerprint, open_stores, placeholder_embedding, recover, search, write_fact,
+    open_stores, placeholder_embedding, recover, search, write_fact,
     NamespaceId, Query, RecoveryConfig, SourceRef, WriteInput, PLACEHOLDER_EMBEDDING_NAME,
 };
 
@@ -111,8 +111,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let owns_scratch = args.data_dir.is_none();
 
-    let fingerprint = default_fingerprint();
-    let (ledger, mut keyring, mut indexes) = open_stores(&scratch)?;
+    let (ledger, mut keyring, mut indexes) = open_stores(&scratch, None)?;
+    let fingerprint = indexes.vector.fingerprint().clone();
 
     // --- corpus ---------------------------------------------------------
     let ingest_start = Instant::now();
@@ -124,7 +124,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &mut keyring,
             WriteInput {
                 namespace: NamespaceId(NAMESPACE.into()),
-                embedding: Some(placeholder_embedding(&content)),
+                embedding: Some(placeholder_embedding(&content, fingerprint.dimensions)),
                 content: content.into_bytes(),
                 embedding_model: fingerprint.clone(),
                 valid_from: chrono::Utc::now(),
@@ -156,9 +156,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut samples = Vec::with_capacity(args.queries as usize);
         for i in 0..args.queries {
             let text = query_text(i);
-            let precomputed = (!embed_inside).then(|| placeholder_embedding(&text));
+            let precomputed = (!embed_inside).then(|| placeholder_embedding(&text, fingerprint.dimensions));
             let start = Instant::now();
-            let embedding = precomputed.unwrap_or_else(|| placeholder_embedding(&text));
+            let embedding = precomputed.unwrap_or_else(|| placeholder_embedding(&text, fingerprint.dimensions));
             search(
                 &ledger,
                 &indexes,

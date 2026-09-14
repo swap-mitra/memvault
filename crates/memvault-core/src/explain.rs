@@ -12,6 +12,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::budget::pack_to_budget;
+use crate::crypto::{DecryptError, Keyring};
 use crate::decay::{apply_decay, DecayConfig, ScoredCandidate};
 use crate::index::{IndexError, Indexes};
 use crate::ledger::{Ledger, LedgerError};
@@ -32,6 +33,10 @@ pub enum SearchError {
     Ledger(#[from] LedgerError),
     #[error(transparent)]
     Index(#[from] IndexError),
+    /// An `Injected` candidate's content would not decrypt: erased between
+    /// the search and the read, or a keyring that doesn't match the ledger.
+    #[error("cannot read content of injected fact {fact_id}: {source}")]
+    Decrypt { fact_id: Uuid, source: DecryptError },
 }
 
 struct Resolved {
@@ -185,6 +190,35 @@ pub fn search(ledger: &Ledger, indexes: &Indexes, query: Query) -> Result<(Vec<E
     ledger.append(namespace, now, Payload::Retrieval(retrieval))?;
 
     Ok((explanations, retrieval_id))
+}
+
+/// The plaintext of one `Injected` candidate: what the agent actually gets
+/// to read. Kept apart from `Explanation` on purpose -- that struct is
+/// written verbatim into the ledger's Retrieval record, and content must
+/// only ever live there encrypted under its own erasable key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InjectedFact {
+    pub fact_id: Uuid,
+    pub content: Vec<u8>,
+}
+
+/// Decrypts every `Injected` candidate of a search, in the order they were
+/// packed (best `final_score` first). Any other outcome is skipped: a cut
+/// or filtered fact was not handed to the agent, so its content isn't
+/// either.
+pub fn injected_contents(ledger: &Ledger, keyring: &Keyring, explanations: &[Explanation]) -> Result<Vec<InjectedFact>, SearchError> {
+    let mut out = Vec::new();
+    for e in explanations.iter().filter(|e| e.outcome == Outcome::Injected) {
+        let record = ledger.read(e.ledger_seq)?.ok_or(LedgerError::Decode(crate::record::DecodeError::TrailingBytes))?;
+        let Payload::Assert(assert) = record.payload else {
+            unreachable!("an Injected candidate's ledger_seq always points at its Assert record");
+        };
+        let content = keyring
+            .decrypt(e.fact_id, &assert.content)
+            .map_err(|source| SearchError::Decrypt { fact_id: e.fact_id, source })?;
+        out.push(InjectedFact { fact_id: e.fact_id, content });
+    }
+    Ok(out)
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -1081,7 +1081,11 @@ memvault --data-dir ./my-memory forget &lt;fact_id&gt; --reason "customer deleti
                   </tr>
                   <tr>
                     <th scope="row">memory_search</th>
-                    <td>Hybrid retrieval, with the full provenance table.</td>
+                    <td>
+                      Hybrid retrieval. Returns the injected facts with their
+                      content, best first, plus the full provenance table as
+                      rows. Every tool answers in structured JSON.
+                    </td>
                   </tr>
                   <tr>
                     <th scope="row">memory_as_of</th>
@@ -1136,8 +1140,8 @@ MEMVAULT_GRPC_ADDR=127.0.0.1:50051 \
               </div>
               <p>
                 Off by default, for multi-process deployments where stdio is not
-                available. The same six operations, as structured messages
-                instead of text; the schema is
+                available. The same six operations, as protobuf messages
+                with the same shapes as the MCP tools&rsquo; JSON; the schema is
                 <code>crates/memvault-server/proto/memvault.proto</code>. A
                 default build <em>rejects</em> <code>MEMVAULT_GRPC_ADDR</code>
                 rather than ignoring it, so a half-configured deployment fails
@@ -1170,8 +1174,10 @@ pip install --find-links target/wheels memvault</pre>
 mv = memvault.MemVault("./my-memory")
 fact_id = mv.write("project", "the deploy script lives in ops/deploy.sh")
 
-retrieval_id, explanations = mv.search("project", "deploy script")
-for e in explanations:
+result = mv.search("project", "deploy script")
+for f in result.injected:    <span class="cm"># what goes in context, best first</span>
+    print(f.fact_id, f.content)
+for e in result.candidates:  <span class="cm"># why: every candidate considered</span>
     print(e.fact_id, e.outcome, e.final_score, e.token_cost)
 
 mv.verify()  <span class="cm"># raises if the chain is broken</span></pre>
@@ -1411,8 +1417,8 @@ because the vector index builds from source.
 
 4. Tell me to restart the client, then prove the round trip: call
    memory_write with namespace "project" and some fact about this repo,
-   call memory_search for it, and report the retrieval_id and the outcome
-   column you got back.</pre>
+   call memory_search for it, and report the retrieval_id and each
+   candidate's outcome you got back.</pre>
           </div>
           <p class="cap">
             It clones, builds, writes the config with absolute paths, and then

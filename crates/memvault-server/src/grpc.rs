@@ -2,17 +2,17 @@
 //! and off by default: it exists for multi-process deployments, and the
 //! primary stdio/MCP case must not pay for it.
 //!
-//! Same six operations as the MCP tools, over the same `Stores`. The only
-//! difference is the wire shape: MCP returns text an agent reads, this
-//! returns structured messages a program consumes.
+//! Same six operations as the MCP tools, over the same `Stores`, with the
+//! same shapes: protobuf messages here, JSON there.
 
 use std::sync::Arc;
 
 use tonic::{Request, Response, Status};
 
 use memvault_core::{
-    default_fingerprint, erase, explain as core_explain, memory_as_of, search as core_search,
-    supersede_fact, write_fact, AsOfQuery, Explanation, NamespaceId, Query, SourceRef, WriteInput,
+    erase, explain as core_explain, injected_contents, memory_as_of, search as core_search,
+    supersede_fact, write_fact, AsOfQuery, Explanation, InjectedFact, NamespaceId, Query, SourceRef,
+    WriteInput,
 };
 
 use crate::Stores;
@@ -65,10 +65,14 @@ fn to_pb(e: &Explanation) -> pb::Explanation {
     }
 }
 
-fn search_response(retrieval_id: uuid::Uuid, explanations: &[Explanation]) -> pb::SearchResponse {
+fn search_response(retrieval_id: uuid::Uuid, explanations: &[Explanation], injected: &[InjectedFact]) -> pb::SearchResponse {
     pb::SearchResponse {
         retrieval_id: retrieval_id.to_string(),
         explanations: explanations.iter().map(to_pb).collect(),
+        injected: injected
+            .iter()
+            .map(|f| pb::InjectedFact { fact_id: f.fact_id.to_string(), content: String::from_utf8_lossy(&f.content).into_owned() })
+            .collect(),
     }
 }
 
@@ -81,6 +85,8 @@ impl Memory for MemoryService {
     async fn write(&self, request: Request<pb::WriteRequest>) -> Result<Response<pb::WriteResponse>, Status> {
         let req = request.into_inner();
         let fact_id = req.fact_id.as_deref().map(|s| parse_uuid("fact_id", s)).transpose()?;
+        let valid_from = parse_time("valid_from", req.valid_from.as_ref())?.unwrap_or_else(chrono::Utc::now);
+        let valid_to = parse_time("valid_to", req.valid_to.as_ref())?;
 
         let mut keyring = self.stores.keyring.lock().unwrap();
         let mut indexes = self.stores.indexes.lock().unwrap();
@@ -92,13 +98,13 @@ impl Memory for MemoryService {
                 namespace: NamespaceId(req.namespace),
                 content: req.content.into_bytes(),
                 embedding: embedding(req.embedding),
-                embedding_model: default_fingerprint(),
-                valid_from: chrono::Utc::now(),
-                valid_to: None,
+                embedding_model: self.stores.fingerprint.clone(),
+                valid_from,
+                valid_to,
                 fact_id,
                 keywords: req.keywords,
                 pinned: req.pinned,
-                source: SourceRef::default(),
+                source: req.source.map(|s| SourceRef(s.into_bytes())).unwrap_or_default(),
             },
         )
         .map_err(engine_err)?;
@@ -108,6 +114,9 @@ impl Memory for MemoryService {
 
     async fn search(&self, request: Request<pb::SearchRequest>) -> Result<Response<pb::SearchResponse>, Status> {
         let req = request.into_inner();
+        // Same lock order as forget, so no erase lands between scoring a
+        // fact and reading its content.
+        let keyring = self.stores.keyring.lock().unwrap();
         let indexes = self.stores.indexes.lock().unwrap();
         let (explanations, retrieval_id) = core_search(
             &self.stores.ledger,
@@ -123,8 +132,9 @@ impl Memory for MemoryService {
             },
         )
         .map_err(engine_err)?;
+        let injected = injected_contents(&self.stores.ledger, &keyring, &explanations).map_err(engine_err)?;
 
-        Ok(Response::new(search_response(retrieval_id, &explanations)))
+        Ok(Response::new(search_response(retrieval_id, &explanations, &injected)))
     }
 
     async fn as_of(&self, request: Request<pb::AsOfRequest>) -> Result<Response<pb::AsOfResponse>, Status> {
@@ -181,7 +191,7 @@ impl Memory for MemoryService {
     async fn explain(&self, request: Request<pb::ExplainRequest>) -> Result<Response<pb::SearchResponse>, Status> {
         let retrieval_id = parse_uuid("retrieval_id", &request.into_inner().retrieval_id)?;
         let explanations = core_explain(&self.stores.ledger, retrieval_id).map_err(engine_err)?;
-        Ok(Response::new(search_response(retrieval_id, &explanations)))
+        Ok(Response::new(search_response(retrieval_id, &explanations, &[])))
     }
 }
 
@@ -249,6 +259,8 @@ mod tests {
             .expect("written fact missing from search results");
         assert_eq!(hit.outcome, "Injected");
         assert!(hit.bm25_rank.is_some(), "no BM25 rank: the keyword axis never ran");
+        assert_eq!(response.injected[0].fact_id, fact_id);
+        assert_eq!(response.injected[0].content, "the deploy script lives in ops/deploy.sh");
 
         std::fs::remove_dir_all(&dir).ok();
     }

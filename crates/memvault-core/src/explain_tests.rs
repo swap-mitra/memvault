@@ -176,3 +176,39 @@ fn test_search_never_returns_another_namespaces_facts() {
     assert!(!returned.contains(&theirs), "tenant-b's fact leaked into tenant-a's search: {returned:?}");
     assert_eq!(returned.len(), 1, "only tenant-a's fact should have been considered at all: {returned:?}");
 }
+
+/// What the agent reads: the plaintext of every `Injected` candidate, in
+/// packing order, and nothing for the ones that were cut.
+#[test]
+fn injected_contents_returns_only_what_was_injected_in_order() {
+    let mut h = harness();
+    let now = Utc::now();
+
+    let best = write(&mut h, "the deploy script lives in ops/deploy.sh", vec![1.0, 0.0, 0.0, 0.0], now - Duration::days(1), None);
+    let second = write(&mut h, "staging runs postgres 16", vec![0.9, 0.436, 0.0, 0.0], now - Duration::days(1), None);
+    let big_content: String = "x".repeat(400);
+    let cut = write(&mut h, &big_content, vec![0.8, 0.6, 0.0, 0.0], now - Duration::days(1), None);
+    h.indexes.keyword.commit().unwrap();
+
+    let (explanations, _) = search(
+        &h.ledger,
+        &h.indexes,
+        Query {
+            text: None,
+            embedding: Some(vec![1.0, 0.0, 0.0, 0.0]),
+            embedding_model: None,
+            namespace: NamespaceId("default".into()),
+            as_of: None,
+            k: 10,
+            max_tokens: 40,
+        },
+    )
+    .unwrap();
+
+    let injected = crate::explain::injected_contents(&h.ledger, &h.keyring, &explanations).unwrap();
+    let ids: Vec<Uuid> = injected.iter().map(|f| f.fact_id).collect();
+    assert_eq!(ids, vec![best, second], "packing order, best score first: {ids:?}");
+    assert!(!ids.contains(&cut), "a CutByBudget fact must not be handed back as content");
+    assert_eq!(injected[0].content, b"the deploy script lives in ops/deploy.sh");
+    assert_eq!(injected[1].content, b"staging runs postgres 16");
+}
