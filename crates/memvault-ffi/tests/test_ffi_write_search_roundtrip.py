@@ -80,10 +80,12 @@ def test_forget_removes_from_search_and_leaves_chain_verifying():
         before = mv.search(NS, "api key vault").candidates
         assert fact_id in [e.fact_id for e in before]
 
+        assert mv.get(fact_id).content == "the api key is stored in vault at secret/api"
         mv.forget(fact_id, reason="test erasure")
 
         after = mv.search(NS, "api key vault").candidates
         assert fact_id not in [e.fact_id for e in after]
+        assert mv.get(fact_id) is None, "a forgotten fact has no readable version"
         mv.verify()  # raises if erasure broke the chain
 
 

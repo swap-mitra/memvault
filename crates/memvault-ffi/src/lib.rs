@@ -18,8 +18,8 @@ use pyo3::prelude::*;
 use uuid::Uuid;
 
 use memvault_core::{
-    erase, explain as core_explain, injected_contents, lock, memory_as_of, open_stores, recover,
-    search as core_search, supersede_fact, write_fact, AsOfQuery, Explanation as CoreExplanation,
+    erase, explain as core_explain, get_fact, injected_contents, lock, memory_as_of, open_stores,
+    recover, search as core_search, supersede_fact, write_fact, AsOfFact, AsOfQuery, Explanation as CoreExplanation,
     Indexes, InjectedFact, Keyring, Ledger, ModelFingerprint, NamespaceId, Query, RecoveryConfig,
     SourceRef, WriteInput,
 };
@@ -129,6 +129,17 @@ struct PyFact {
     valid_from: String,
     valid_to: Option<String>,
     content: String,
+}
+
+impl From<&AsOfFact> for PyFact {
+    fn from(f: &AsOfFact) -> Self {
+        PyFact {
+            fact_id: f.fact_id.to_string(),
+            valid_from: f.valid_from.to_rfc3339(),
+            valid_to: f.valid_to.map(|t| t.to_rfc3339()),
+            content: String::from_utf8_lossy(&f.content).into_owned(),
+        }
+    }
 }
 
 #[pymethods]
@@ -328,15 +339,19 @@ impl PyMemVault {
                 AsOfQuery { valid_time, transaction_time },
             )
             .map_err(engine_err)?;
-            Ok(facts
-                .iter()
-                .map(|f| PyFact {
-                    fact_id: f.fact_id.to_string(),
-                    valid_from: f.valid_from.to_rfc3339(),
-                    valid_to: f.valid_to.map(|t| t.to_rfc3339()),
-                    content: String::from_utf8_lossy(&f.content).into_owned(),
-                })
-                .collect())
+            Ok(facts.iter().map(PyFact::from).collect())
+        })
+    }
+
+    /// One fact's current version by id, or `None` when no version is open
+    /// (never written, superseded without a replacement, or forgotten).
+    fn get(&self, py: Python<'_>, fact_id: &str) -> PyResult<Option<PyFact>> {
+        let fact_id = parse_uuid("fact_id", fact_id)?;
+        py.detach(|| {
+            let stores = lock(&self.stores);
+            get_fact(&stores.ledger, &stores.keyring, fact_id)
+                .map(|fact| fact.as_ref().map(PyFact::from))
+                .map_err(engine_err)
         })
     }
 

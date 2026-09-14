@@ -113,7 +113,7 @@ mod lock_tests {
     }
 }
 
-pub use bitemporal::{memory_as_of, AsOfError, AsOfFact, AsOfQuery};
+pub use bitemporal::{get_fact, memory_as_of, AsOfError, AsOfFact, AsOfQuery};
 pub use budget::{pack_to_budget, PricedCandidate};
 pub use chain::{record_hash, verify_chain_from, ChainError};
 pub use crypto::{content_hash, DecryptError, Keyring, KeyringError};

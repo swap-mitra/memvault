@@ -8,6 +8,8 @@ package memvault.v1;
 service Memory {
   rpc Write(WriteRequest) returns (WriteResponse);
   rpc Search(SearchRequest) returns (SearchResponse);
+  // One fact's current version. NOT_FOUND when no version is open.
+  rpc Get(GetRequest) returns (Fact);
   rpc AsOf(AsOfRequest) returns (AsOfResponse);
   rpc Supersede(SupersedeRequest) returns (SupersedeResponse);
   rpc Forget(ForgetRequest) returns (ForgetResponse);
@@ -72,6 +74,10 @@ message SearchResponse {
   // What to put in context, best first: the Injected candidates' content.
   // Empty from Explain, which replays scores, never content.
   repeated InjectedFact injected = 3;
+}
+
+message GetRequest {
+  string fact_id = 1;
 }
 
 message AsOfRequest {

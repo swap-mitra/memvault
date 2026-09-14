@@ -12,7 +12,7 @@ use clap::{Parser, Subcommand};
 use uuid::Uuid;
 
 use memvault_core::{
-    erase, explain, explanation_row, injected_contents, memory_as_of, open_stores, outcome_cell,
+    erase, explain, explanation_row, get_fact, injected_contents, memory_as_of, open_stores, outcome_cell,
     placeholder_embedding, recover, search, supersede_fact, write_fact, AsOfQuery, Explanation,
     Indexes, Keyring, Ledger, NamespaceId, Outcome, Payload, Query, RecoveryConfig, SourceRef,
     WriteInput, EXPLANATION_HEADER,
@@ -56,6 +56,24 @@ enum Command {
     },
     /// Reconstruct a past retrieval from the ledger by its id.
     Explain { retrieval_id: Uuid },
+    /// Read one fact's current version by id.
+    Get { fact_id: Uuid },
+    /// Print the MCP client config for this data directory, with absolute
+    /// paths filled in, ready to paste into .mcp.json or
+    /// claude_desktop_config.json.
+    McpConfig {
+        /// OpenAI-compatible embeddings base URL the server should call,
+        /// e.g. http://localhost:11434/v1 for Ollama.
+        #[arg(long = "embed-url", requires = "embed_model")]
+        embed_url: Option<String>,
+        /// Embedding model name at that URL, e.g. nomic-embed-text.
+        #[arg(long = "embed-model", requires = "embed_url")]
+        embed_model: Option<String>,
+        /// Embedding width for a new directory when the client supplies its
+        /// own vectors instead.
+        #[arg(long = "embedding-dim")]
+        embedding_dim: Option<u32>,
+    },
     /// Point-in-time query: what was true, or what was believed true, as
     /// of a given moment (RFC 3339, e.g. 2026-01-01T00:00:00Z). Omitting
     /// either bound means "now" on that axis.
@@ -143,6 +161,44 @@ fn outcome_sgr_code(outcome: Outcome) -> &'static str {
     }
 }
 
+fn print_fact(f: &memvault_core::AsOfFact) {
+    let content = String::from_utf8_lossy(&f.content);
+    let valid_to = f.valid_to.map(|t| t.to_rfc3339()).unwrap_or_else(|| "open".into());
+    println!("{} [{} .. {}] {}", f.fact_id, f.valid_from.to_rfc3339(), valid_to, content);
+}
+
+fn json_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The `mcpServers` block a client wants, by hand rather than through a
+/// JSON crate: four keys, and the shape is fixed by the MCP clients.
+fn mcp_config_json(server: &Path, data_dir: &Path, env: &[(&str, String)]) -> String {
+    let mut out = String::new();
+    out.push_str("{\n  \"mcpServers\": {\n    \"memvault\": {\n");
+    out.push_str(&format!("      \"command\": {},\n", json_string(&server.to_string_lossy())));
+    out.push_str(&format!("      \"args\": [{}]", json_string(&data_dir.to_string_lossy())));
+    if !env.is_empty() {
+        out.push_str(",\n      \"env\": {\n");
+        let entries: Vec<String> = env.iter().map(|(k, v)| format!("        {}: {}", json_string(k), json_string(v))).collect();
+        out.push_str(&entries.join(",\n"));
+        out.push_str("\n      }");
+    }
+    out.push_str("\n    }\n  }\n}");
+    out
+}
+
 fn print_explanations(explanations: &[Explanation]) {
     let color = color_enabled();
     println!("{}", colorize(EXPLANATION_HEADER, "1", color)); // bold
@@ -223,10 +279,33 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let stores = open(&cli.data_dir)?;
             let facts = memory_as_of(&stores.ledger, &stores.keyring, &NamespaceId(namespace), AsOfQuery { valid_time, transaction_time })?;
             for f in &facts {
-                let content = String::from_utf8_lossy(&f.content);
-                let valid_to = f.valid_to.map(|t| t.to_rfc3339()).unwrap_or_else(|| "open".into());
-                println!("{} [{} .. {}] {}", f.fact_id, f.valid_from.to_rfc3339(), valid_to, content);
+                print_fact(f);
             }
+        }
+        Command::Get { fact_id } => {
+            let stores = open(&cli.data_dir)?;
+            let fact = get_fact(&stores.ledger, &stores.keyring, fact_id)?.ok_or_else(|| format!("no open version of fact {fact_id}"))?;
+            print_fact(&fact);
+        }
+        Command::McpConfig { embed_url, embed_model, embedding_dim } => {
+            // The server binary ships next to this one, in a release
+            // archive and in target/ alike.
+            let server = std::env::current_exe()?.with_file_name(format!("memvault-server{}", std::env::consts::EXE_SUFFIX));
+            if !server.exists() {
+                eprintln!("warning: {} does not exist yet; build or download memvault-server next to this binary", server.display());
+            }
+            let data_dir = std::path::absolute(&cli.data_dir)?;
+            let mut env = Vec::new();
+            if let Some(url) = embed_url {
+                env.push(("MEMVAULT_EMBED_URL", url));
+            }
+            if let Some(model) = embed_model {
+                env.push(("MEMVAULT_EMBED_MODEL", model));
+            }
+            if let Some(dim) = embedding_dim {
+                env.push(("MEMVAULT_EMBEDDING_DIM", dim.to_string()));
+            }
+            println!("{}", mcp_config_json(&server, &data_dir, &env));
         }
         Command::Supersede { fact_id, valid_to, reason } => {
             let mut stores = open(&cli.data_dir)?;
@@ -284,6 +363,12 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_string_escapes_windows_paths_and_quotes() {
+        assert_eq!(json_string(r"C:\Users\me\mem"), r#""C:\\Users\\me\\mem""#);
+        assert_eq!(json_string("a\"b"), r#""a\"b""#);
+    }
 
     #[test]
     fn colorize_wraps_in_ansi_when_enabled() {

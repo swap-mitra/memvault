@@ -1068,7 +1068,7 @@ memvault --data-dir ./my-memory forget &lt;fact_id&gt; --reason "customer deleti
                 working directory the client happened to launch it from, which
                 is rarely the one you expect.
               </p>
-              <p>Restart the client and the agent has six tools:</p>
+              <p>Restart the client and the agent has seven tools:</p>
               <table class="spec">
                 <tbody>
                   <tr>
@@ -1086,6 +1086,10 @@ memvault --data-dir ./my-memory forget &lt;fact_id&gt; --reason "customer deleti
                       content, best first, plus the full provenance table as
                       rows. Every tool answers in structured JSON.
                     </td>
+                  </tr>
+                  <tr>
+                    <th scope="row">memory_get</th>
+                    <td>One fact&rsquo;s current version by id.</td>
                   </tr>
                   <tr>
                     <th scope="row">memory_as_of</th>
@@ -1443,11 +1447,12 @@ because the vector index builds from source.
           <table class="spec">
             <tbody>
               <tr>
-                <th scope="row">Embeddings are caller-supplied</th>
+                <th scope="row">Embeddings come from outside</th>
                 <td>
                   MemVault runs no model. The MCP and Python surfaces accept an
-                  <code>embedding</code> and fall back to keyword-only retrieval
-                  without one.
+                  <code>embedding</code>; the server can fetch one from an
+                  OpenAI-compatible provider you configure, and without either
+                  it falls back to keyword-only retrieval.
                 </td>
               </tr>
               <tr>

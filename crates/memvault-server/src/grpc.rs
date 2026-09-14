@@ -10,9 +10,9 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 use memvault_core::{
-    erase, explain as core_explain, injected_contents, lock, memory_as_of, search as core_search,
-    supersede_fact, write_fact, AsOfQuery, Explanation, InjectedFact, NamespaceId, Query, SourceRef,
-    WriteInput,
+    erase, explain as core_explain, get_fact, injected_contents, lock, memory_as_of, search as core_search,
+    supersede_fact, write_fact, AsOfFact, AsOfQuery, Explanation, InjectedFact, NamespaceId, Query,
+    SourceRef, WriteInput,
 };
 
 use crate::Stores;
@@ -65,6 +65,17 @@ fn to_pb(e: &Explanation) -> pb::Explanation {
     }
 }
 
+fn fact_pb(f: &AsOfFact) -> pb::Fact {
+    pb::Fact {
+        fact_id: f.fact_id.to_string(),
+        ledger_seq: f.ledger_seq,
+        valid_from: f.valid_from.to_rfc3339(),
+        valid_to: f.valid_to.map(|t| t.to_rfc3339()),
+        content: String::from_utf8_lossy(&f.content).into_owned(),
+        pinned: f.pinned,
+    }
+}
+
 fn search_response(retrieval_id: uuid::Uuid, explanations: &[Explanation], injected: &[InjectedFact]) -> pb::SearchResponse {
     pb::SearchResponse {
         retrieval_id: retrieval_id.to_string(),
@@ -87,6 +98,10 @@ impl Memory for MemoryService {
         let fact_id = req.fact_id.as_deref().map(|s| parse_uuid("fact_id", s)).transpose()?;
         let valid_from = parse_time("valid_from", req.valid_from.as_ref())?.unwrap_or_else(chrono::Utc::now);
         let valid_to = parse_time("valid_to", req.valid_to.as_ref())?;
+        let embedding = match embedding(req.embedding) {
+            Some(embedding) => Some(embedding),
+            None => self.stores.embed(&req.content).await.map_err(Status::unavailable)?,
+        };
 
         let mut keyring = lock(&self.stores.keyring);
         let mut indexes = lock(&self.stores.indexes);
@@ -97,7 +112,7 @@ impl Memory for MemoryService {
             WriteInput {
                 namespace: NamespaceId(req.namespace),
                 content: req.content.into_bytes(),
-                embedding: embedding(req.embedding),
+                embedding,
                 embedding_model: self.stores.fingerprint.clone(),
                 valid_from,
                 valid_to,
@@ -114,6 +129,15 @@ impl Memory for MemoryService {
 
     async fn search(&self, request: Request<pb::SearchRequest>) -> Result<Response<pb::SearchResponse>, Status> {
         let req = request.into_inner();
+        let (embedding, embedding_model) = match (embedding(req.embedding), req.query.as_deref()) {
+            (Some(embedding), _) => (Some(embedding), None),
+            (None, Some(query)) => match self.stores.embed(query).await.map_err(Status::unavailable)? {
+                Some(embedding) => (Some(embedding), Some(self.stores.fingerprint.clone())),
+                None => (None, None),
+            },
+            (None, None) => (None, None),
+        };
+
         // Same lock order as forget, so no erase lands between scoring a
         // fact and reading its content.
         let keyring = lock(&self.stores.keyring);
@@ -124,8 +148,8 @@ impl Memory for MemoryService {
             &keyring,
             Query {
                 text: req.query,
-                embedding: embedding(req.embedding),
-                embedding_model: None,
+                embedding,
+                embedding_model,
                 namespace: NamespaceId(req.namespace),
                 as_of: None,
                 k: req.k as usize,
@@ -136,6 +160,13 @@ impl Memory for MemoryService {
         let injected = injected_contents(&self.stores.ledger, &keyring, &explanations).map_err(engine_err)?;
 
         Ok(Response::new(search_response(retrieval_id, &explanations, &injected)))
+    }
+
+    async fn get(&self, request: Request<pb::GetRequest>) -> Result<Response<pb::Fact>, Status> {
+        let fact_id = parse_uuid("fact_id", &request.into_inner().fact_id)?;
+        let keyring = lock(&self.stores.keyring);
+        let fact = get_fact(&self.stores.ledger, &keyring, fact_id).map_err(engine_err)?;
+        fact.as_ref().map(fact_pb).map(Response::new).ok_or_else(|| Status::not_found(format!("no open version of fact {fact_id}")))
     }
 
     async fn as_of(&self, request: Request<pb::AsOfRequest>) -> Result<Response<pb::AsOfResponse>, Status> {
@@ -152,19 +183,7 @@ impl Memory for MemoryService {
         )
         .map_err(engine_err)?;
 
-        Ok(Response::new(pb::AsOfResponse {
-            facts: facts
-                .iter()
-                .map(|f| pb::Fact {
-                    fact_id: f.fact_id.to_string(),
-                    ledger_seq: f.ledger_seq,
-                    valid_from: f.valid_from.to_rfc3339(),
-                    valid_to: f.valid_to.map(|t| t.to_rfc3339()),
-                    content: String::from_utf8_lossy(&f.content).into_owned(),
-                    pinned: f.pinned,
-                })
-                .collect(),
-        }))
+        Ok(Response::new(pb::AsOfResponse { facts: facts.iter().map(fact_pb).collect() }))
     }
 
     async fn supersede(&self, request: Request<pb::SupersedeRequest>) -> Result<Response<pb::SupersedeResponse>, Status> {
@@ -216,7 +235,7 @@ mod tests {
     #[tokio::test]
     async fn grpc_write_then_search_roundtrips() {
         let dir = std::env::temp_dir().join(format!("memvault-grpc-smoke-{}", uuid::Uuid::new_v4()));
-        let stores = Arc::new(Stores::open(&dir).expect("open stores"));
+        let stores = Arc::new(Stores::open(&dir).await.expect("open stores"));
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local_addr");
@@ -262,6 +281,11 @@ mod tests {
         assert!(hit.bm25_rank.is_some(), "no BM25 rank: the keyword axis never ran");
         assert_eq!(response.injected[0].fact_id, fact_id);
         assert_eq!(response.injected[0].content, "the deploy script lives in ops/deploy.sh");
+
+        let fact = client.get(pb::GetRequest { fact_id: fact_id.clone() }).await.expect("get").into_inner();
+        assert_eq!(fact.content, "the deploy script lives in ops/deploy.sh");
+        let missing = client.get(pb::GetRequest { fact_id: uuid::Uuid::new_v4().to_string() }).await;
+        assert_eq!(missing.expect_err("unknown id").code(), tonic::Code::NotFound);
 
         std::fs::remove_dir_all(&dir).ok();
     }

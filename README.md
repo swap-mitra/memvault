@@ -146,14 +146,18 @@ That table is the point of the product, so it is worth reading across:
 
 ## Quickstart 2 — connect it to an MCP client
 
-This is the setup an actual agent uses. Point your MCP client at
-`memvault-server`, giving it a data directory as its one argument:
+This is the setup an actual agent uses. The CLI prints the client config
+for you, with absolute paths filled in:
+
+```sh
+memvault --data-dir ./my-memory mcp-config
+```
 
 ```json
 {
   "mcpServers": {
     "memvault": {
-      "command": "/absolute/path/to/memvault/target/release/memvault-server",
+      "command": "/absolute/path/to/memvault-server",
       "args": ["/absolute/path/to/my-memory"]
     }
   }
@@ -167,29 +171,42 @@ This is the setup an actual agent uses. Point your MCP client at
 | **Any other MCP client** | Same shape; it is a plain stdio server. |
 
 > [!WARNING]
-> Use absolute paths for both. The server inherits whatever working directory
-> the client happens to launch it from, which is rarely the one you expect.
+> If you write the file by hand, use absolute paths for both. The server
+> inherits whatever working directory the client happens to launch it from,
+> which is rarely the one you expect.
 
-If your client will pass real embeddings, tell the server their width the
-first time it creates the directory, with an `env` entry next to `args`:
+**Semantic search needs an embedding provider.** An LLM cannot produce
+embedding vectors itself, so an MCP client on its own gets keyword-only
+retrieval. Point the server at any OpenAI-compatible `/embeddings` endpoint
+and it embeds every write and every query for you:
 
-```json
-      "env": { "MEMVAULT_EMBEDDING_DIM": "1536" }
+```sh
+memvault --data-dir ./my-memory mcp-config \
+  --embed-url http://localhost:11434/v1 --embed-model nomic-embed-text
 ```
 
-The width is stored in the directory and read back on every later start, so
-you can drop the variable afterwards. A different value against an existing
-directory is refused at startup rather than served wrong. Without it, a new
+That adds an `env` block with `MEMVAULT_EMBED_URL` and `MEMVAULT_EMBED_MODEL`
+(and `MEMVAULT_EMBED_API_KEY` if the provider wants a bearer token; set it in
+the same block). The example is Ollama; `https://api.openai.com/v1` with
+`text-embedding-3-small` works the same way. The model's name and width are
+stored in the directory the first time, and a different model against the
+same directory is refused at startup rather than mixed in. A provider error
+fails the call rather than quietly degrading to keyword search.
+
+If your client passes its own embeddings instead, `--embedding-dim 1536`
+records the width up front (`MEMVAULT_EMBEDDING_DIM`). Without either, a new
 directory gets 32 dimensions, which is what the CLI's stand-in vectors need.
 
-Restart the client, and the agent has six tools. Every one answers with
+Restart the client, and the agent has seven tools. Every one answers with
 JSON in `structuredContent` (mirrored as a text block for older clients),
-so the agent reads fields, not columns:
+so the agent reads fields, not columns. The server's instructions tell the
+agent when to write, how to recall, and what to do when a fact changes:
 
 | Tool | What it does |
 |---|---|
 | `memory_write` | Assert a fact, optionally with `valid_from` / `valid_to` (RFC 3339) and an opaque `source`. Pass an existing `fact_id` to supersede that fact instead — it has to be one of this namespace's own. |
 | `memory_search` | Hybrid retrieval. Returns `injected`, the facts that made it into the answer with their content, best first, plus `candidates`, the full provenance table above as rows. |
+| `memory_get` | One fact's current version by `fact_id`. |
 | `memory_as_of` | What was true — or what the engine believed — at a given moment. |
 | `memory_supersede` | Close a fact's interval without asserting a replacement. |
 | `memory_forget` | Cryptographic erase. |
@@ -281,11 +298,12 @@ its search answered before its write finishes — and get an empty result that
 looks like a bug. Real MCP clients already wait per response; hand-rolled
 smoke tests are where this bites.
 
-**`ann_rank` is `null` here.** Embeddings are caller-supplied: MemVault runs
-no model, so if your client doesn't pass an `embedding`, only the keyword
-axis runs. That's a working configuration, not a broken one — it is just
-BM25 rather than hybrid retrieval. The CLI shows both axes because it
-generates a stand-in vector; see [Known limits](#known-limits).
+**`ann_rank` is `null` here.** No embedding provider is configured and the
+script passed no `embedding`, so only the keyword axis ran. That's a working
+configuration, not a broken one — it is just BM25 rather than hybrid
+retrieval. Configure `MEMVAULT_EMBED_URL` and `MEMVAULT_EMBED_MODEL` (see
+above) and the same script gets a vector rank too. The CLI shows both axes
+because it generates a stand-in vector; see [Known limits](#known-limits).
 
 </details>
 
@@ -316,6 +334,8 @@ for f in result.injected:          # what goes in context, best first
     print(f.fact_id, f.content)
 for e in result.candidates:        # why: every candidate considered
     print(e.fact_id, e.outcome, e.final_score, e.token_cost)
+
+mv.get(fact_id)                    # one fact's current version, or None
 
 mv.verify()  # raises if the chain is broken
 ```
@@ -407,7 +427,7 @@ Stated plainly, because each one will otherwise look like a bug.
 
 | Limit | What it means for you |
 |---|---|
-| **Embeddings are caller-supplied** | MemVault runs no model. The MCP and Python surfaces accept an `embedding` and fall back to keyword-only retrieval without one. A data directory has one embedding width, set when it is created (`MEMVAULT_EMBEDDING_DIM` on the server, `embedding_dim=` in Python, 32 if unsaid) and refused if contradicted later. The CLI and demos hash trigrams into a vector of that width so the fusion machinery has something to run on — that stand-in is *not* semantically meaningful, and no number produced with it should be read as retrieval quality. |
+| **Embeddings come from outside** | MemVault runs no model. The MCP and Python surfaces accept an `embedding`; the server can also fetch one from an OpenAI-compatible provider you configure (`MEMVAULT_EMBED_URL`, `MEMVAULT_EMBED_MODEL`), and without either it falls back to keyword-only retrieval. A data directory has one embedding model and width, set when it is created and refused if contradicted later. The CLI and demos hash trigrams into a vector of that width so the fusion machinery has something to run on — that stand-in is *not* semantically meaningful, and no number produced with it should be read as retrieval quality. |
 | **Namespaces isolate results, but share one candidate pool** | A search never returns another namespace's facts. It does draw candidates from indexes shared across the whole data directory and filter afterwards, so a namespace holding far more facts than its neighbours can crowd them out of that pool and cost them recall. Nothing leaks either way; a very lopsided multi-tenant directory is still better off with a `--data-dir` per tenant. |
 | **Token counts are estimates by default** | Ciphertext bytes / 4, not a tokenizer. Close enough for budgeting English prose, drifting on code. Build with `--features tokenizer` and the `tokens` column becomes a real cl100k_base count of the decrypted content; the vocabulary is compiled in and no model runs. |
 | **Decay measures from a fact's own start** | Not from last access — so retrieval does not yet reinforce a fact against decay. |

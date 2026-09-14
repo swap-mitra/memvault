@@ -112,6 +112,32 @@ pub fn memory_as_of(ledger: &Ledger, keyring: &Keyring, namespace: &NamespaceId,
     Ok(results)
 }
 
+/// The current version of one fact by id: its open `Assert`, decrypted.
+/// `None` when no version is open -- never written, superseded without a
+/// replacement, or erased. A ledger read, so it costs nothing at scale
+/// where `memory_as_of` walks the whole namespace.
+pub fn get_fact(ledger: &Ledger, keyring: &Keyring, fact_id: Uuid) -> Result<Option<AsOfFact>, AsOfError> {
+    let Some(seq) = ledger.open_assert_seq(fact_id) else {
+        return Ok(None);
+    };
+    let record = ledger.read(seq)?.ok_or(LedgerError::Decode(crate::record::DecodeError::TrailingBytes))?;
+    let Payload::Assert(assert) = record.payload else {
+        unreachable!("open_facts only ever points at Assert records");
+    };
+    match keyring.decrypt(fact_id, &assert.content) {
+        Ok(content) => Ok(Some(AsOfFact {
+            fact_id,
+            ledger_seq: seq,
+            valid_from: assert.valid_from,
+            valid_to: assert.valid_to,
+            content,
+            pinned: assert.pinned,
+        })),
+        Err(DecryptError::KeyDestroyed) => Ok(None),
+        Err(e) => Err(AsOfError::Decrypt(e)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

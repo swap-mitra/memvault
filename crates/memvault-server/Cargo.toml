@@ -7,6 +7,11 @@ license.workspace = true
 [dependencies]
 chrono = "0.4.45"
 memvault-core = { path = "../memvault-core" }
+# For the optional embedding provider (embed.rs): an MCP client cannot
+# produce vectors itself, so the server has to be able to ask something
+# that can. Async to match rmcp's runtime; rustls so the binary stays free
+# of a system TLS dependency.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rmcp = { version = "3.1.2", features = ["server", "macros", "transport-io"] }
 schemars = "1.2.2"
 serde = { version = "1.0.229", features = ["derive"] }

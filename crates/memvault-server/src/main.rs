@@ -7,10 +7,13 @@
 //!
 //! `MEMVAULT_EMBEDDING_DIM` sets the embedding width when a data directory
 //! is first created; after that the directory's own index decides, and a
-//! conflicting value is refused at startup. Setting `MEMVAULT_GRPC_ADDR`
-//! serves the same operations over gRPC instead, if the binary was built
-//! with `--features grpc`.
+//! conflicting value is refused at startup. `MEMVAULT_EMBED_URL` and
+//! `MEMVAULT_EMBED_MODEL` point the server at an embedding provider so it
+//! can vectorise writes and queries itself (see embed.rs). Setting
+//! `MEMVAULT_GRPC_ADDR` serves the same operations over gRPC instead, if
+//! the binary was built with `--features grpc`.
 
+mod embed;
 #[cfg(feature = "grpc")]
 mod grpc;
 
@@ -31,10 +34,12 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use memvault_core::{
-    erase, explain, lock, memory_as_of, open_stores, recover, supersede_fact, write_fact, AsOfFact,
-    AsOfQuery, Explanation, Indexes, InjectedFact, Keyring, Ledger, ModelFingerprint, NamespaceId,
-    Query, RecoveryConfig, SourceRef, WriteInput,
+    erase, explain, get_fact, lock, memory_as_of, open_stores, recover, supersede_fact, write_fact,
+    AsOfFact, AsOfQuery, Explanation, Indexes, InjectedFact, Keyring, Ledger, ModelFingerprint,
+    NamespaceId, Query, RecoveryConfig, SourceRef, WriteInput,
 };
+
+use crate::embed::Embedder;
 
 fn default_k() -> usize {
     10
@@ -95,6 +100,11 @@ struct SupersedeParams {
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 struct ExplainParams {
     retrieval_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct GetParams {
+    fact_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -242,18 +252,77 @@ struct Stores {
     /// The data directory's embedding fingerprint, read from the vector
     /// index once at open: what every write is validated against.
     fingerprint: ModelFingerprint,
+    /// Set when `MEMVAULT_EMBED_URL`/`MEMVAULT_EMBED_MODEL` are configured.
+    embedder: Option<Embedder>,
 }
 
 impl Stores {
-    fn open(data_dir: &Path) -> Result<Self, Box<dyn std::error::Error>> {
-        let requested = configured_fingerprint()?;
+    async fn open(data_dir: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        let embedder = Embedder::from_env()?;
+        let configured_dim = configured_fingerprint()?;
+
+        // A provider decides the fingerprint for a new directory: its
+        // model's name and whatever width it actually returns, learned by
+        // embedding a probe once at startup rather than trusted from config.
+        let requested = match &embedder {
+            Some(embedder) => {
+                let probe = embedder.embed("memvault embedding width probe").await.map_err(|e| format!("embedding provider: {e}"))?;
+                let dimensions = probe.len() as u32;
+                if let Some(configured) = &configured_dim {
+                    if configured.dimensions != dimensions {
+                        return Err(format!(
+                            "MEMVAULT_EMBEDDING_DIM={} but model {:?} returns {dimensions}-dimensional embeddings",
+                            configured.dimensions,
+                            embedder.model()
+                        )
+                        .into());
+                    }
+                }
+                Some(ModelFingerprint { name: embedder.model().to_string(), dimensions, revision_hash: [0u8; 32] })
+            }
+            None => configured_dim,
+        };
+
         let (ledger, keyring, mut indexes) = open_stores(data_dir, requested.as_ref())?;
         let fingerprint = indexes.vector.fingerprint().clone();
 
-        let report = recover(&ledger, &mut indexes, &keyring, &fingerprint, RecoveryConfig { verify_chain: true })?;
-        eprintln!("memvault-server: recovery report: {report:?} ({} dimensions)", fingerprint.dimensions);
+        // open_stores checked the width. A directory that already names a
+        // *different* model is refused too: same width, different vector
+        // space, silently wrong neighbours. "caller-supplied" is the one
+        // name that makes no claim, so adopting a provider over it is
+        // allowed.
+        if let Some(embedder) = &embedder {
+            if fingerprint.name != embedder.model() && fingerprint.name != "caller-supplied" {
+                return Err(format!(
+                    "{} holds embeddings from model {:?}, but MEMVAULT_EMBED_MODEL is {:?}",
+                    data_dir.display(),
+                    fingerprint.name,
+                    embedder.model()
+                )
+                .into());
+            }
+        }
 
-        Ok(Stores { ledger, keyring: Mutex::new(keyring), indexes: Mutex::new(indexes), fingerprint })
+        let report = recover(&ledger, &mut indexes, &keyring, &fingerprint, RecoveryConfig { verify_chain: true })?;
+        eprintln!(
+            "memvault-server: recovery report: {report:?} ({} dimensions, embeddings {})",
+            fingerprint.dimensions,
+            match &embedder {
+                Some(e) => format!("by {:?}", e.model()),
+                None => "caller-supplied".to_string(),
+            }
+        );
+
+        Ok(Stores { ledger, keyring: Mutex::new(keyring), indexes: Mutex::new(indexes), fingerprint, embedder })
+    }
+
+    /// The provider's vector for `text`, or `None` when no provider is
+    /// configured and the caller has to bring its own.
+    async fn embed(&self, text: &str) -> Result<Option<Vec<f32>>, String> {
+        match &self.embedder {
+            Some(embedder) => embedder.embed(text).await.map(Some).map_err(|e| format!("embedding provider: {e}")),
+            None => Ok(None),
+        }
     }
 }
 
@@ -264,20 +333,27 @@ struct MemVaultServer {
 }
 
 impl MemVaultServer {
-    fn open(data_dir: &Path) -> Result<Self, Box<dyn std::error::Error>> {
-        Ok(MemVaultServer { stores: Arc::new(Stores::open(data_dir)?), tool_router: Self::tool_router() })
+    async fn open(data_dir: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        Ok(MemVaultServer { stores: Arc::new(Stores::open(data_dir).await?), tool_router: Self::tool_router() })
     }
 }
 
 #[tool_router(router = tool_router)]
 impl MemVaultServer {
-    #[tool(name = "memory_write", description = "Assert a fact, with optional embedding, pin, and validity interval")]
+    #[tool(
+        name = "memory_write",
+        description = "Remember one durable fact, stated so it stands alone. Pass fact_id to supersede an existing fact with this new version. Set pinned for facts that must never decay. valid_from/valid_to (RFC 3339) bound when the fact is true."
+    )]
     async fn memory_write(&self, Parameters(params): Parameters<WriteParams>) -> Result<Json<FactIdResult>, String> {
         let fact_id = params
             .fact_id
             .map(|s| Uuid::parse_str(&s))
             .transpose()
             .map_err(|e| format!("invalid fact_id: {e}"))?;
+        let embedding = match params.embedding {
+            Some(embedding) => Some(embedding),
+            None => self.stores.embed(&params.content).await?,
+        };
 
         let mut keyring = lock(&self.stores.keyring);
         let mut indexes = lock(&self.stores.indexes);
@@ -288,7 +364,7 @@ impl MemVaultServer {
             WriteInput {
                 namespace: NamespaceId(params.namespace),
                 content: params.content.into_bytes(),
-                embedding: params.embedding,
+                embedding,
                 embedding_model: self.stores.fingerprint.clone(),
                 valid_from: params.valid_from.unwrap_or_else(chrono::Utc::now),
                 valid_to: params.valid_to,
@@ -303,9 +379,17 @@ impl MemVaultServer {
         Ok(Json(FactIdResult { fact_id: written.to_string() }))
     }
 
+    #[tool(name = "memory_get", description = "Read one fact's current version by fact_id. Errors if no version is open (superseded, forgotten, or never written).")]
+    async fn memory_get(&self, Parameters(params): Parameters<GetParams>) -> Result<Json<FactRow>, String> {
+        let fact_id = Uuid::parse_str(&params.fact_id).map_err(|e| format!("invalid fact_id: {e}"))?;
+        let keyring = lock(&self.stores.keyring);
+        let fact = get_fact(&self.stores.ledger, &keyring, fact_id).map_err(|e| e.to_string())?;
+        fact.as_ref().map(FactRow::from).map(Json).ok_or_else(|| format!("no open version of fact {fact_id}"))
+    }
+
     #[tool(
         name = "memory_as_of",
-        description = "Point-in-time query: what was true, or what was believed true, at a given valid_time/transaction_time. Omit either for 'now' on that axis."
+        description = "Every fact in a namespace that was true at valid_time, as believed at transaction_time (RFC 3339; omit either for now). Whole namespace, no ranking: use memory_search to find things, this to audit a moment."
     )]
     async fn memory_as_of(&self, Parameters(params): Parameters<AsOfParams>) -> Result<Json<AsOfResult>, String> {
         // Reads the ledger/keyring directly, not the indexes -- see bitemporal.rs.
@@ -321,7 +405,7 @@ impl MemVaultServer {
         Ok(Json(AsOfResult { facts: facts.iter().map(FactRow::from).collect() }))
     }
 
-    #[tool(name = "memory_supersede", description = "Close a fact's open interval without asserting a replacement")]
+    #[tool(name = "memory_supersede", description = "Mark a fact as no longer true from valid_to (default now) without asserting a replacement. To replace it instead, memory_write with its fact_id.")]
     async fn memory_supersede(&self, Parameters(params): Parameters<SupersedeParams>) -> Result<Json<FactIdResult>, String> {
         let fact_id = Uuid::parse_str(&params.fact_id).map_err(|e| format!("invalid fact_id: {e}"))?;
         let valid_to = params.valid_to.unwrap_or_else(chrono::Utc::now);
@@ -332,7 +416,7 @@ impl MemVaultServer {
         Ok(Json(FactIdResult { fact_id: fact_id.to_string() }))
     }
 
-    #[tool(name = "memory_forget", description = "Cryptographically erase a fact: destroy its key so its content is permanently unreadable, everywhere. The ledger record stays; only its content becomes unrecoverable.")]
+    #[tool(name = "memory_forget", description = "Cryptographically erase a fact when asked to forget it: its key is destroyed and the content is unrecoverable everywhere, forever. The ledger keeps a record that something was forgotten, with the reason.")]
     async fn memory_forget(&self, Parameters(params): Parameters<ForgetParams>) -> Result<Json<FactIdResult>, String> {
         let fact_id = Uuid::parse_str(&params.fact_id).map_err(|e| format!("invalid fact_id: {e}"))?;
 
@@ -345,9 +429,18 @@ impl MemVaultServer {
 
     #[tool(
         name = "memory_search",
-        description = "Hybrid search. Returns the injected facts' content, best first, plus full provenance for every candidate considered"
+        description = "Recall: hybrid keyword + vector search over one namespace. Put `injected` (content, best first, already packed to max_tokens) in context; `candidates` is the audit trail of everything considered, cut ones included, with a retrieval_id for memory_explain."
     )]
     async fn memory_search(&self, Parameters(params): Parameters<SearchParams>) -> Result<Json<SearchResult>, String> {
+        let (embedding, embedding_model) = match (params.embedding, params.query.as_deref()) {
+            (Some(embedding), _) => (Some(embedding), None),
+            (None, Some(query)) => match self.stores.embed(query).await? {
+                Some(embedding) => (Some(embedding), Some(self.stores.fingerprint.clone())),
+                None => (None, None),
+            },
+            (None, None) => (None, None),
+        };
+
         // Both locks, in the same order as memory_forget, so no erase can
         // land between scoring a fact and reading its content.
         let keyring = lock(&self.stores.keyring);
@@ -358,8 +451,8 @@ impl MemVaultServer {
             &keyring,
             Query {
                 text: params.query,
-                embedding: params.embedding,
-                embedding_model: None,
+                embedding,
+                embedding_model,
                 namespace: NamespaceId(params.namespace),
                 as_of: None,
                 k: params.k,
@@ -376,7 +469,7 @@ impl MemVaultServer {
         }))
     }
 
-    #[tool(name = "memory_explain", description = "Reconstruct a past retrieval exactly from the ledger, including candidates that didn't make it")]
+    #[tool(name = "memory_explain", description = "Why did a past memory_search return what it did? Replays its full candidate table from the ledger by retrieval_id, cut candidates included.")]
     async fn memory_explain(&self, Parameters(params): Parameters<ExplainParams>) -> Result<Json<ExplainResult>, String> {
         let retrieval_id = Uuid::parse_str(&params.retrieval_id).map_err(|e| format!("invalid retrieval_id: {e}"))?;
         let explanations = explain::explain(&self.stores.ledger, retrieval_id).map_err(|e| e.to_string())?;
@@ -387,11 +480,24 @@ impl MemVaultServer {
     }
 }
 
+/// What the agent reads once, at connect time. This shapes how memory gets
+/// used more than any code below it, so it says when to write, how to
+/// recall, and what to do when a fact changes.
+const INSTRUCTIONS: &str = "\
+MemVault is your long-term memory: a local, append-only, hash-chained store of facts that outlives this conversation.
+
+When to write: after learning something durable about the user, the project, or a decision -- a preference, a convention, a path, a date, an owner, a reason. One fact per memory_write, phrased so it makes sense with no conversation around it (\"the deploy script lives in ops/deploy.sh\", not \"it's in the ops folder\"). Don't store transcripts, or anything you can re-derive by looking at the workspace. Pin facts that must never fade.
+
+Namespaces: one per subject that must never mix, such as one per project or per user. A search only ever sees the namespace it was given.
+
+Recall: before answering from memory, memory_search the namespace. Put the `injected` contents in context; they are already packed to the token budget, best first. `candidates` is the audit trail of everything considered, including what was cut and why. Keep the retrieval_id if you may need to justify the answer; memory_explain replays it later.
+
+When a fact changes: memory_write the new version with the old fact_id, which supersedes it and keeps the history. When something stopped being true with no replacement: memory_supersede. When the user asks you to forget something: memory_forget, and it is unrecoverable. memory_get reads one fact by id; memory_as_of lists what was true at a moment.";
+
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for MemVaultServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions("MemVault: local-first memory engine for AI agents. Every write and retrieval is recorded in an append-only, hash-chained ledger.")
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(INSTRUCTIONS)
     }
 }
 
@@ -406,10 +512,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     #[cfg(feature = "grpc")]
     if let Some(addr) = grpc_addr {
-        return grpc::serve(Arc::new(Stores::open(&data_dir)?), addr.parse()?).await;
+        return grpc::serve(Arc::new(Stores::open(&data_dir).await?), addr.parse()?).await;
     }
 
-    let server = MemVaultServer::open(&data_dir)?;
+    let server = MemVaultServer::open(&data_dir).await?;
     let running = server.serve(rmcp::transport::stdio()).await?;
     running.waiting().await?;
     Ok(())
