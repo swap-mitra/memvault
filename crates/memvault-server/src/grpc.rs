@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
 use memvault_core::{
-    erase, explain as core_explain, injected_contents, memory_as_of, search as core_search,
+    erase, explain as core_explain, injected_contents, lock, memory_as_of, search as core_search,
     supersede_fact, write_fact, AsOfQuery, Explanation, InjectedFact, NamespaceId, Query, SourceRef,
     WriteInput,
 };
@@ -88,8 +88,8 @@ impl Memory for MemoryService {
         let valid_from = parse_time("valid_from", req.valid_from.as_ref())?.unwrap_or_else(chrono::Utc::now);
         let valid_to = parse_time("valid_to", req.valid_to.as_ref())?;
 
-        let mut keyring = self.stores.keyring.lock().unwrap();
-        let mut indexes = self.stores.indexes.lock().unwrap();
+        let mut keyring = lock(&self.stores.keyring);
+        let mut indexes = lock(&self.stores.indexes);
         let written = write_fact(
             &self.stores.ledger,
             &mut indexes,
@@ -171,7 +171,7 @@ impl Memory for MemoryService {
         let fact_id = parse_uuid("fact_id", &req.fact_id)?;
         let valid_to = parse_time("valid_to", req.valid_to.as_ref())?.unwrap_or_else(chrono::Utc::now);
 
-        let mut indexes = self.stores.indexes.lock().unwrap();
+        let mut indexes = lock(&self.stores.indexes);
         supersede_fact(&self.stores.ledger, &mut indexes, fact_id, valid_to, req.reason).map_err(engine_err)?;
 
         Ok(Response::new(pb::SupersedeResponse {}))
@@ -181,8 +181,8 @@ impl Memory for MemoryService {
         let req = request.into_inner();
         let fact_id = parse_uuid("fact_id", &req.fact_id)?;
 
-        let mut keyring = self.stores.keyring.lock().unwrap();
-        let mut indexes = self.stores.indexes.lock().unwrap();
+        let mut keyring = lock(&self.stores.keyring);
+        let mut indexes = lock(&self.stores.indexes);
         erase(&self.stores.ledger, &mut keyring, &mut indexes, fact_id, req.reason).map_err(engine_err)?;
 
         Ok(Response::new(pb::ForgetResponse {}))

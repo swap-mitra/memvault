@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use memvault_core::{
-    erase, explain, memory_as_of, open_stores, recover, supersede_fact, write_fact, AsOfFact,
+    erase, explain, lock, memory_as_of, open_stores, recover, supersede_fact, write_fact, AsOfFact,
     AsOfQuery, Explanation, Indexes, InjectedFact, Keyring, Ledger, ModelFingerprint, NamespaceId,
     Query, RecoveryConfig, SourceRef, WriteInput,
 };
@@ -279,8 +279,8 @@ impl MemVaultServer {
             .transpose()
             .map_err(|e| format!("invalid fact_id: {e}"))?;
 
-        let mut keyring = self.stores.keyring.lock().unwrap();
-        let mut indexes = self.stores.indexes.lock().unwrap();
+        let mut keyring = lock(&self.stores.keyring);
+        let mut indexes = lock(&self.stores.indexes);
         let written = write_fact(
             &self.stores.ledger,
             &mut indexes,
@@ -326,7 +326,7 @@ impl MemVaultServer {
         let fact_id = Uuid::parse_str(&params.fact_id).map_err(|e| format!("invalid fact_id: {e}"))?;
         let valid_to = params.valid_to.unwrap_or_else(chrono::Utc::now);
 
-        let mut indexes = self.stores.indexes.lock().unwrap();
+        let mut indexes = lock(&self.stores.indexes);
         supersede_fact(&self.stores.ledger, &mut indexes, fact_id, valid_to, params.reason).map_err(|e| e.to_string())?;
 
         Ok(Json(FactIdResult { fact_id: fact_id.to_string() }))
@@ -336,8 +336,8 @@ impl MemVaultServer {
     async fn memory_forget(&self, Parameters(params): Parameters<ForgetParams>) -> Result<Json<FactIdResult>, String> {
         let fact_id = Uuid::parse_str(&params.fact_id).map_err(|e| format!("invalid fact_id: {e}"))?;
 
-        let mut keyring = self.stores.keyring.lock().unwrap();
-        let mut indexes = self.stores.indexes.lock().unwrap();
+        let mut keyring = lock(&self.stores.keyring);
+        let mut indexes = lock(&self.stores.indexes);
         erase(&self.stores.ledger, &mut keyring, &mut indexes, fact_id, params.reason).map_err(|e| e.to_string())?;
 
         Ok(Json(FactIdResult { fact_id: fact_id.to_string() }))

@@ -18,7 +18,7 @@ use pyo3::prelude::*;
 use uuid::Uuid;
 
 use memvault_core::{
-    erase, explain as core_explain, injected_contents, memory_as_of, open_stores, recover,
+    erase, explain as core_explain, injected_contents, lock, memory_as_of, open_stores, recover,
     search as core_search, supersede_fact, write_fact, AsOfQuery, Explanation as CoreExplanation,
     Indexes, InjectedFact, Keyring, Ledger, ModelFingerprint, NamespaceId, Query, RecoveryConfig,
     SourceRef, WriteInput,
@@ -206,7 +206,7 @@ impl PyMemVault {
     /// The embedding width this data directory was created with.
     #[getter]
     fn embedding_dim(&self) -> u32 {
-        self.stores.lock().unwrap().fingerprint.dimensions
+        lock(&self.stores).fingerprint.dimensions
     }
 
     /// Assert a fact. Passing `fact_id` supersedes that fact's currently-open
@@ -231,7 +231,7 @@ impl PyMemVault {
         let valid_to = parse_time("valid_to", valid_to)?;
 
         py.detach(|| {
-            let mut stores = self.stores.lock().unwrap();
+            let mut stores = lock(&self.stores);
             let Stores { ledger, keyring, indexes, fingerprint } = &mut *stores;
             write_fact(
                 ledger,
@@ -298,7 +298,7 @@ impl PyMemVault {
     fn explain(&self, py: Python<'_>, retrieval_id: &str) -> PyResult<Vec<PyExplanation>> {
         let retrieval_id = parse_uuid("retrieval_id", retrieval_id)?;
         py.detach(|| {
-            let stores = self.stores.lock().unwrap();
+            let stores = lock(&self.stores);
             core_explain(&stores.ledger, retrieval_id)
                 .map(|es| es.iter().map(PyExplanation::from).collect())
                 .map_err(engine_err)
@@ -352,7 +352,7 @@ impl PyMemVault {
         let valid_to = parse_time("valid_to", valid_to)?.unwrap_or_else(Utc::now);
 
         py.detach(|| {
-            let mut stores = self.stores.lock().unwrap();
+            let mut stores = lock(&self.stores);
             let Stores { ledger, indexes, .. } = &mut *stores;
             supersede_fact(ledger, indexes, fact_id, valid_to, reason).map_err(engine_err)
         })
@@ -364,7 +364,7 @@ impl PyMemVault {
     fn forget(&self, py: Python<'_>, fact_id: &str, reason: String) -> PyResult<()> {
         let fact_id = parse_uuid("fact_id", fact_id)?;
         py.detach(|| {
-            let mut stores = self.stores.lock().unwrap();
+            let mut stores = lock(&self.stores);
             let Stores { ledger, keyring, indexes, .. } = &mut *stores;
             erase(ledger, keyring, indexes, fact_id, reason).map_err(engine_err)
         })
@@ -375,7 +375,7 @@ impl PyMemVault {
     #[pyo3(signature = (*, from=0))]
     fn verify(&self, py: Python<'_>, from: u64) -> PyResult<()> {
         py.detach(|| {
-            let stores = self.stores.lock().unwrap();
+            let stores = lock(&self.stores);
             stores.ledger.verify_from(from).map_err(engine_err)
         })
     }

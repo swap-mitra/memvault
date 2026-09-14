@@ -89,6 +89,30 @@ pub fn open_stores(
     Ok((ledger, keyring, Indexes { vector, keyword }))
 }
 
+/// Locks `mutex`, taking the guard back if a previous holder panicked. A
+/// panic while a guard is held poisons the mutex, and `unwrap()` on every
+/// later lock turns one failed request into a dead process: a server that
+/// refuses every call after the first bad one. The ledger is the durable
+/// truth and recovery reconciles the indexes at the next start, so serving
+/// on is the right call; the panic itself was already reported.
+pub fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+#[cfg(test)]
+mod lock_tests {
+    #[test]
+    fn a_poisoned_mutex_still_hands_out_its_value() {
+        let m = std::sync::Mutex::new(7);
+        let poison = std::panic::catch_unwind(|| {
+            let _guard = m.lock().unwrap();
+            panic!("holder dies");
+        });
+        assert!(poison.is_err() && m.is_poisoned());
+        assert_eq!(*super::lock(&m), 7);
+    }
+}
+
 pub use bitemporal::{memory_as_of, AsOfError, AsOfFact, AsOfQuery};
 pub use budget::{pack_to_budget, PricedCandidate};
 pub use chain::{record_hash, verify_chain_from, ChainError};

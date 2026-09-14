@@ -86,14 +86,14 @@ impl Ledger {
                 Payload::Retrieval(_) | Payload::Checkpoint(_) => {}
             }
         }
-        *ledger.open_facts.lock().unwrap() = open_facts;
+        *crate::lock(&ledger.open_facts) = open_facts;
 
         Ok(ledger)
     }
 
     /// The seq of `fact_id`'s currently-open `Assert`, if any.
     pub fn open_assert_seq(&self, fact_id: Uuid) -> Option<u64> {
-        self.open_facts.lock().unwrap().get(&fact_id).copied()
+        crate::lock(&self.open_facts).get(&fact_id).copied()
     }
 
     /// Number of records in the ledger, i.e. the seq that will be assigned
@@ -150,7 +150,7 @@ impl Ledger {
     /// for why that matters. Returns the new Assert's seq and, if this
     /// write superseded a prior one, that prior Assert's seq.
     pub fn write_assert(&self, namespace: NamespaceId, recorded_at: DateTime<Utc>, assert: Assert) -> Result<WriteAssertOutcome, LedgerError> {
-        let mut open_facts = self.open_facts.lock().unwrap();
+        let mut open_facts = crate::lock(&self.open_facts);
         let fact_id = assert.fact_id;
         let superseded_seq = open_facts.get(&fact_id).copied();
 
@@ -203,7 +203,7 @@ impl Ledger {
     /// closing an existing fact has no independent namespace to supply).
     /// Returns the closed Assert's seq and the new record's seq.
     fn close_open_fact(&self, recorded_at: DateTime<Utc>, fact_id: Uuid, build_payload: impl FnOnce(u64) -> Payload) -> Result<Option<(u64, u64)>, LedgerError> {
-        let mut open_facts = self.open_facts.lock().unwrap();
+        let mut open_facts = crate::lock(&self.open_facts);
         let Some(target_seq) = open_facts.get(&fact_id).copied() else {
             return Ok(None);
         };
