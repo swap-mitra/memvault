@@ -402,7 +402,7 @@ Stated plainly, because each one will otherwise look like a bug.
 |---|---|
 | **Embeddings are caller-supplied** | MemVault runs no model. The MCP and Python surfaces accept an `embedding` and fall back to keyword-only retrieval without one. A data directory has one embedding width, set when it is created (`MEMVAULT_EMBEDDING_DIM` on the server, `embedding_dim=` in Python, 32 if unsaid) and refused if contradicted later. The CLI and demos hash trigrams into a vector of that width so the fusion machinery has something to run on — that stand-in is *not* semantically meaningful, and no number produced with it should be read as retrieval quality. |
 | **Namespaces isolate results, but share one candidate pool** | A search never returns another namespace's facts. It does draw candidates from indexes shared across the whole data directory and filter afterwards, so a namespace holding far more facts than its neighbours can crowd them out of that pool and cost them recall. Nothing leaks either way; a very lopsided multi-tenant directory is still better off with a `--data-dir` per tenant. |
-| **Token counts are estimates** | Ciphertext bytes / 4, not a tokenizer. Close enough for budgeting English prose, drifting on code. |
+| **Token counts are estimates by default** | Ciphertext bytes / 4, not a tokenizer. Close enough for budgeting English prose, drifting on code. Build with `--features tokenizer` and the `tokens` column becomes a real cl100k_base count of the decrypted content; the vocabulary is compiled in and no model runs. |
 | **Decay measures from a fact's own start** | Not from last access — so retrieval does not yet reinforce a fact against decay. |
 
 ---

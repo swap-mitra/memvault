@@ -85,7 +85,7 @@ fn test_exit_explain_and_erase() {
         k: 2,
         max_tokens: 10,
     };
-    let (explanations, retrieval_id) = search(&h.ledger, &h.indexes, query).unwrap();
+    let (explanations, retrieval_id) = search(&h.ledger, &h.indexes, &h.keyring, query).unwrap();
 
     let outcome_of = |fact_id: Uuid| explanations.iter().find(|e| e.fact_id == fact_id).map(|e| e.outcome);
     assert_eq!(outcome_of(injected), Some(Outcome::Injected));
@@ -107,6 +107,7 @@ fn test_exit_explain_and_erase() {
     let (post_erase, _) = search(
         &h.ledger,
         &h.indexes,
+        &h.keyring,
         Query {
             text: None,
             embedding: Some(vec![1.0, 0.0, 0.0, 0.0]),

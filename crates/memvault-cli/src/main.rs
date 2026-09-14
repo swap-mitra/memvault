@@ -191,6 +191,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let (explanations, retrieval_id) = search(
                 &stores.ledger,
                 &stores.indexes,
+                &stores.keyring,
                 Query {
                     text: Some(query),
                     embedding: Some(embedding),

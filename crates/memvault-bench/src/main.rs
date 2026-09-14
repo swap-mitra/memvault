@@ -162,6 +162,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             search(
                 &ledger,
                 &indexes,
+                &keyring,
                 Query {
                     text: Some(text),
                     embedding: Some(embedding),

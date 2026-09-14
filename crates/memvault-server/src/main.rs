@@ -309,7 +309,7 @@ impl MemVaultServer {
     )]
     async fn memory_as_of(&self, Parameters(params): Parameters<AsOfParams>) -> Result<Json<AsOfResult>, String> {
         // Reads the ledger/keyring directly, not the indexes -- see bitemporal.rs.
-        let keyring = self.stores.keyring.lock().unwrap();
+        let keyring = lock(&self.stores.keyring);
         let facts = memory_as_of(
             &self.stores.ledger,
             &keyring,
@@ -350,11 +350,12 @@ impl MemVaultServer {
     async fn memory_search(&self, Parameters(params): Parameters<SearchParams>) -> Result<Json<SearchResult>, String> {
         // Both locks, in the same order as memory_forget, so no erase can
         // land between scoring a fact and reading its content.
-        let keyring = self.stores.keyring.lock().unwrap();
-        let indexes = self.stores.indexes.lock().unwrap();
+        let keyring = lock(&self.stores.keyring);
+        let indexes = lock(&self.stores.indexes);
         let (explanations, retrieval_id) = explain::search(
             &self.stores.ledger,
             &indexes,
+            &keyring,
             Query {
                 text: params.query,
                 embedding: params.embedding,

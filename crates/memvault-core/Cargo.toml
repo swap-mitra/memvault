@@ -12,8 +12,16 @@ cxx = "1.0.199"
 redb = "4.1.0"
 tantivy = "0.26.1"
 thiserror = "2.0.18"
+# Behind `tokenizer` only: real token counts for budget packing need a BPE
+# vocabulary, and the default build stays free of anything model-shaped.
+tiktoken-rs = { version = "0.12.0", optional = true }
 usearch = "2.26.0"
 uuid = "1.24.1"
+
+[features]
+# Count a fact's context cost with cl100k_base on its plaintext instead of
+# estimating from its byte length. Decrypts each candidate on the read path.
+tokenizer = ["dep:tiktoken-rs"]
 
 [dev-dependencies]
 tempfile = "3.27.0"

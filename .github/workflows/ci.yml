@@ -25,5 +25,9 @@ jobs:
       # under the feature, so it needs its own invocation.
       - run: cargo test -p memvault-server --features grpc
 
+      # Real token counts are opt-in; the byte estimate is what the default
+      # build ships, so both paths are tested.
+      - run: cargo test -p memvault-core --features tokenizer
+
       - run: bash demo/run_demo_1.sh
       - run: bash demo/run_demo_2.sh

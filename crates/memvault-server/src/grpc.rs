@@ -116,11 +116,12 @@ impl Memory for MemoryService {
         let req = request.into_inner();
         // Same lock order as forget, so no erase lands between scoring a
         // fact and reading its content.
-        let keyring = self.stores.keyring.lock().unwrap();
-        let indexes = self.stores.indexes.lock().unwrap();
+        let keyring = lock(&self.stores.keyring);
+        let indexes = lock(&self.stores.indexes);
         let (explanations, retrieval_id) = core_search(
             &self.stores.ledger,
             &indexes,
+            &keyring,
             Query {
                 text: req.query,
                 embedding: embedding(req.embedding),
@@ -142,7 +143,7 @@ impl Memory for MemoryService {
         let valid_time = parse_time("valid_time", req.valid_time.as_ref())?;
         let transaction_time = parse_time("transaction_time", req.transaction_time.as_ref())?;
 
-        let keyring = self.stores.keyring.lock().unwrap();
+        let keyring = lock(&self.stores.keyring);
         let facts = memory_as_of(
             &self.stores.ledger,
             &keyring,

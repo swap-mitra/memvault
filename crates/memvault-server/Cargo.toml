@@ -24,6 +24,8 @@ protoc-bin-vendored = { version = "3.2.0", optional = true }
 tonic-prost-build = { version = "0.14.6", optional = true }
 
 [features]
+# Real token counts in the provenance table; see memvault-core.
+tokenizer = ["memvault-core/tokenizer"]
 grpc = ["dep:prost", "dep:tonic", "dep:tonic-prost", "dep:protoc-bin-vendored", "dep:tonic-prost-build"]
 
 [dev-dependencies]

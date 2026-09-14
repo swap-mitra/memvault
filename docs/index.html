@@ -1459,10 +1459,12 @@ because the vector index builds from source.
                 </td>
               </tr>
               <tr>
-                <th scope="row">Token counts are estimates</th>
+                <th scope="row">Token counts are estimates by default</th>
                 <td>
                   Ciphertext bytes / 4, not a tokenizer. Close enough for
-                  English prose, drifting on code.
+                  English prose, drifting on code. Build with
+                  <code>--features tokenizer</code> for a real cl100k_base
+                  count; the vocabulary is compiled in and no model runs.
                 </td>
               </tr>
               <tr>

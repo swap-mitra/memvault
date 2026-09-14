@@ -269,10 +269,11 @@ impl PyMemVault {
         max_tokens: u32,
     ) -> PyResult<PySearchResult> {
         py.detach(|| {
-            let stores = self.stores.lock().unwrap();
+            let stores = lock(&self.stores);
             let (explanations, retrieval_id) = core_search(
                 &stores.ledger,
                 &stores.indexes,
+                &stores.keyring,
                 Query {
                     text: query,
                     embedding,
@@ -319,7 +320,7 @@ impl PyMemVault {
         let transaction_time = parse_time("transaction_time", transaction_time)?;
 
         py.detach(|| {
-            let stores = self.stores.lock().unwrap();
+            let stores = lock(&self.stores);
             let facts = memory_as_of(
                 &stores.ledger,
                 &stores.keyring,

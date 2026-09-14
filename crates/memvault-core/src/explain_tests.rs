@@ -78,7 +78,7 @@ fn test_explanation_includes_all_outcomes() {
         max_tokens: 10, // enough for "injected"'s small ciphertext, not for the 200-byte one
     };
 
-    let (explanations, retrieval_id) = search(&h.ledger, &h.indexes, query).unwrap();
+    let (explanations, retrieval_id) = search(&h.ledger, &h.indexes, &h.keyring, query).unwrap();
 
     let outcome_of = |fact_id: Uuid| {
         explanations
@@ -123,7 +123,7 @@ fn explain_reconstructs_a_past_retrieval_exactly() {
         k: 5,
         max_tokens: 4096,
     };
-    let (original, retrieval_id) = search(&h.ledger, &h.indexes, query).unwrap();
+    let (original, retrieval_id) = search(&h.ledger, &h.indexes, &h.keyring, query).unwrap();
 
     let reconstructed = explain(&h.ledger, retrieval_id).unwrap();
     assert_eq!(reconstructed, original);
@@ -159,6 +159,7 @@ fn test_search_never_returns_another_namespaces_facts() {
     let (explanations, _) = search(
         &h.ledger,
         &h.indexes,
+        &h.keyring,
         Query {
             text: Some("shared secret alpha".into()),
             embedding: Some(vec![1.0, 0.0, 0.0, 0.0]),
@@ -193,6 +194,7 @@ fn injected_contents_returns_only_what_was_injected_in_order() {
     let (explanations, _) = search(
         &h.ledger,
         &h.indexes,
+        &h.keyring,
         Query {
             text: None,
             embedding: Some(vec![1.0, 0.0, 0.0, 0.0]),
@@ -211,4 +213,37 @@ fn injected_contents_returns_only_what_was_injected_in_order() {
     assert!(!ids.contains(&cut), "a CutByBudget fact must not be handed back as content");
     assert_eq!(injected[0].content, b"the deploy script lives in ops/deploy.sh");
     assert_eq!(injected[1].content, b"staging runs postgres 16");
+}
+
+/// Under the `tokenizer` feature the `tokens` column is what cl100k_base
+/// counts on the plaintext, not a byte estimate -- code is where the two
+/// disagree most.
+#[cfg(feature = "tokenizer")]
+#[test]
+fn token_cost_is_a_real_token_count_under_the_tokenizer_feature() {
+    let mut h = harness();
+    let text = "fn main() { println!(\"{}\", (1..=10).sum::<u32>()); }";
+    let id = write(&mut h, text, vec![1.0, 0.0, 0.0, 0.0], Utc::now() - Duration::days(1), None);
+    h.indexes.keyword.commit().unwrap();
+
+    let (explanations, _) = search(
+        &h.ledger,
+        &h.indexes,
+        &h.keyring,
+        Query {
+            text: None,
+            embedding: Some(vec![1.0, 0.0, 0.0, 0.0]),
+            embedding_model: None,
+            namespace: NamespaceId("default".into()),
+            as_of: None,
+            k: 10,
+            max_tokens: 4096,
+        },
+    )
+    .unwrap();
+
+    let row = explanations.iter().find(|e| e.fact_id == id).unwrap();
+    let expected = tiktoken_rs::cl100k_base().unwrap().encode_ordinary(text).len() as u32;
+    assert_eq!(row.token_cost, expected);
+    assert_ne!(row.token_cost, (text.len() as u32 + 16) / 4 + 1, "still the byte estimate");
 }

@@ -17,3 +17,7 @@ uuid = { version = "1.24.1", features = ["v4"] }
 [dev-dependencies]
 redb = "4.1.0"
 tempfile = "3.27.0"
+
+[features]
+# Real token counts in the provenance table; see memvault-core.
+tokenizer = ["memvault-core/tokenizer"]

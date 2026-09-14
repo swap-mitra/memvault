@@ -17,7 +17,7 @@ use crate::decay::{apply_decay, DecayConfig, ScoredCandidate};
 use crate::index::{IndexError, Indexes};
 use crate::ledger::{Ledger, LedgerError};
 use crate::read_path::{hybrid_search, FusedCandidate, Query, SearchError as HybridSearchError};
-use crate::record::{Explanation, NamespaceId, Outcome, Payload, Retrieval};
+use crate::record::{Encrypted, Explanation, NamespaceId, Outcome, Payload, Retrieval};
 
 // ponytail: doc §6.9's namespace-config defaults, hardcoded until a real
 // per-namespace config loader exists. Upgrade path: read these from
@@ -50,11 +50,32 @@ struct Resolved {
     /// at store, updated by this function once one exists, threaded in
     /// here instead of derived from the Assert record.
     last_accessed_stand_in: chrono::DateTime<Utc>,
-    /// ponytail: token_cost ~= ciphertext byte length / 4, a rough
-    /// English-text approximation with no tokenizer dependency. Upgrade
-    /// path: a real tokenizer, when one is available without violating
-    /// P5 (no model calls on the hot path).
+    /// See [`token_cost`].
     token_cost: u32,
+}
+
+/// What a fact costs in context, for budget packing and the `tokens`
+/// column.
+///
+/// ponytail: without the `tokenizer` feature this is ciphertext bytes / 4,
+/// a rough English-prose approximation that drifts on code, and it needs
+/// no plaintext. The stream cipher keeps the ciphertext the plaintext's
+/// length plus a 16-byte tag, so it is a byte count in disguise.
+#[cfg(not(feature = "tokenizer"))]
+fn token_cost(_keyring: &Keyring, _fact_id: Uuid, content: &Encrypted) -> Result<u32, SearchError> {
+    Ok((content.ciphertext.len() as u32) / 4 + 1)
+}
+
+/// With the `tokenizer` feature: the cl100k_base BPE count of the decrypted
+/// content. Not any one vendor's exact tokenizer, but within a few percent
+/// of all of them, which is what a budget needs. The vocabulary is compiled
+/// in; nothing is downloaded and no model runs.
+#[cfg(feature = "tokenizer")]
+fn token_cost(keyring: &Keyring, fact_id: Uuid, content: &Encrypted) -> Result<u32, SearchError> {
+    static BPE: std::sync::OnceLock<tiktoken_rs::CoreBPE> = std::sync::OnceLock::new();
+    let bpe = BPE.get_or_init(|| tiktoken_rs::cl100k_base().expect("cl100k_base is compiled into tiktoken-rs"));
+    let plaintext = keyring.decrypt(fact_id, content).map_err(|source| SearchError::Decrypt { fact_id, source })?;
+    Ok(bpe.encode_ordinary(&String::from_utf8_lossy(&plaintext)).len() as u32)
 }
 
 fn explanation(fused: &FusedCandidate, ledger_seq: u64, decay_weight: f32, final_score: f32, outcome: Outcome, token_cost: u32) -> Explanation {
@@ -92,7 +113,7 @@ fn scored_explanation(c: &ScoredCandidate, resolved: &HashMap<Uuid, Resolved>, o
     }
 }
 
-pub fn search(ledger: &Ledger, indexes: &Indexes, query: Query) -> Result<(Vec<Explanation>, Uuid), SearchError> {
+pub fn search(ledger: &Ledger, indexes: &Indexes, keyring: &Keyring, query: Query) -> Result<(Vec<Explanation>, Uuid), SearchError> {
     let namespace = NamespaceId(query.namespace.0.clone());
     let k = query.k;
     let max_tokens = query.max_tokens;
@@ -148,7 +169,7 @@ pub fn search(ledger: &Ledger, indexes: &Indexes, query: Query) -> Result<(Vec<E
             ledger_seq,
             pinned: assert.pinned,
             last_accessed_stand_in: assert.valid_from,
-            token_cost: (assert.content.ciphertext.len() as u32) / 4 + 1,
+            token_cost: token_cost(keyring, assert.fact_id, &assert.content)?,
         });
     }
 
