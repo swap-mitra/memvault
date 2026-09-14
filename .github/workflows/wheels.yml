@@ -7,6 +7,7 @@ name: wheels
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -59,3 +60,24 @@ jobs:
           path: dist
       - run: pip install --no-index --find-links dist memvault
       - run: python crates/memvault-ffi/tests/test_ffi_write_search_roundtrip.py
+
+  publish:
+    # Tagged builds go to PyPI through trusted publishing: PyPI must list
+    # this repository and workflow as a publisher for the `memvault`
+    # project (a pending publisher works before the first upload). No
+    # token to rotate.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test-wheel
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          merge-multiple: true
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
