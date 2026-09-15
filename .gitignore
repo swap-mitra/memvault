@@ -3,6 +3,7 @@
 # branch, and it is shipped.
 /docs/*
 !/docs/index.html
+!/docs/og.png
 !/docs/check_index.py
 
 # Rust
