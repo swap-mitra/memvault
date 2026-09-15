@@ -4,7 +4,7 @@ Notable changes, newest first. MemVault is pre-1.0: the on-disk format and
 the Python API may change between minor versions, and this file is where
 that is announced.
 
-## Unreleased
+## 0.2.0 (2026-09-15)
 
 ### Added
 

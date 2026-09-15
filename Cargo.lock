@@ -1411,7 +1411,7 @@ dependencies = [
 
 [[package]]
 name = "memvault-bench"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "clap",
@@ -1420,7 +1420,7 @@ dependencies = [
 
 [[package]]
 name = "memvault-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "clap",
@@ -1433,7 +1433,7 @@ dependencies = [
 
 [[package]]
 name = "memvault-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "chacha20poly1305",
@@ -1452,7 +1452,7 @@ dependencies = [
 
 [[package]]
 name = "memvault-ffi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "memvault-core",
@@ -1462,7 +1462,7 @@ dependencies = [
 
 [[package]]
 name = "memvault-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "memvault-core",

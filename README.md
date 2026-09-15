@@ -79,7 +79,7 @@ provision, no service to keep alive.
 install the file, for example:
 
 ```sh
-pip install https://github.com/swap-mitra/memvault/releases/download/v0.1.0/memvault-0.1.0-cp39-abi3-manylinux_2_28_x86_64.whl
+pip install https://github.com/swap-mitra/memvault/releases/download/v0.2.0/memvault-0.2.0-cp39-abi3-manylinux_2_28_x86_64.whl
 ```
 
 The wheel is abi3, so one file covers CPython 3.9 and later. Publishing to
