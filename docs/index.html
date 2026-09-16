@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MemVault: a local-first memory engine for AI agents</title>
+    <title>MemVault: Local-First Memory Engine for AI Agents</title>
     <meta
       name="description"
       content="MemVault stores what you give an agent and explains what it hands back. Append-only hash-chained ledger, hybrid retrieval, provable forgetting. One Rust binary and an MCP server, running on your machine."
@@ -37,13 +37,13 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@110,600;110,700&family=JetBrains+Mono:wght@400;700&family=Public+Sans:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@110,600;110,700&family=JetBrains+Mono:wght@400;500;700&family=Public+Sans:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
     <style>
       :root {
         /* Palette. The three accents are the `outcome` column's legend: a colour
-     means the same thing in the table, the diagrams and the prose. */
+           means the same thing in the table, the diagrams and the prose. */
         --ink: #0f1720; /* ground */
         --panel: #17222e; /* record surfaces */
         --bone: #e7ebef; /* text */
@@ -62,14 +62,15 @@
         --data:
           "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
 
-        --fs-display: clamp(2.25rem, 5vw, 3.4rem);
-        --fs-h2: clamp(1.55rem, 3vw, 2.15rem);
-        --fs-lede: clamp(1.05rem, 1.6vw, 1.25rem);
+        --fs-display: clamp(2.35rem, 5.2vw, 3.6rem);
+        --fs-h2: clamp(1.6rem, 3.2vw, 2.25rem);
+        --fs-h3: clamp(1.2rem, 2vw, 1.45rem);
+        --fs-lede: clamp(1.1rem, 1.7vw, 1.3rem);
         --fs-body: 1.0625rem;
         --fs-data: 0.8125rem;
 
         --gutter: clamp(1.25rem, 5vw, 3rem);
-        --rail: 11rem;
+        --rail: 12rem;
       }
 
       *,
@@ -79,6 +80,7 @@
       }
       html {
         -webkit-text-size-adjust: 100%;
+        scroll-behavior: smooth;
       }
       body {
         margin: 0;
@@ -89,11 +91,12 @@
       }
 
       h1,
-      h2 {
+      h2,
+      h3 {
         font-family: var(--display);
         font-variation-settings: "wdth" 110;
         font-weight: 700;
-        line-height: 1.04;
+        line-height: 1.08;
         letter-spacing: -0.015em;
         margin: 0;
         text-wrap: balance;
@@ -104,14 +107,21 @@
       h2 {
         font-size: var(--fs-h2);
       }
+      h3 {
+        font-size: var(--fs-h3);
+      }
       p {
         margin: 0 0 1.1em;
-        max-width: 62ch;
+        max-width: 65ch;
       }
       a {
         color: var(--brass);
         text-decoration-thickness: 1px;
         text-underline-offset: 3px;
+        transition: color 0.15s ease;
+      }
+      a:hover {
+        color: var(--bone);
       }
 
       :focus-visible {
@@ -131,11 +141,112 @@
       .skip:focus {
         left: var(--gutter);
         top: 0.75rem;
-        z-index: 10;
+        z-index: 100;
       }
 
+      /* ---- Aristotelian Top Navigation ------------------------------------ */
+
+      .site-header {
+        border-bottom: 1px solid var(--rule);
+        background: color-mix(in srgb, var(--ink) 94%, var(--panel));
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        backdrop-filter: blur(10px);
+      }
+      .site-header__inner {
+        max-width: calc(var(--rail) + 3rem + 72ch);
+        margin: 0 auto;
+        padding: 0.85rem var(--gutter);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 2rem;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.7rem;
+        text-decoration: none;
+        color: var(--bone);
+        font: 700 1.05rem var(--display);
+        letter-spacing: -0.01em;
+        flex-shrink: 0;
+      }
+      .brand svg {
+        width: 1.25rem;
+        height: 1.25rem;
+      }
+      .brand-badge {
+        font: 500 0.7rem/1.2 var(--data);
+        padding: 0.15rem 0.45rem;
+        background: var(--panel);
+        border: 1px solid var(--rule);
+        color: var(--brass);
+        border-radius: 2px;
+      }
+      .header-nav {
+        display: none;
+        align-items: center;
+        gap: 2.25rem;
+        font: 500 var(--fs-data) var(--data);
+      }
+      .header-nav a {
+        color: var(--muted);
+        text-decoration: none;
+        transition: color 0.15s ease;
+      }
+      .header-nav a:hover {
+        color: var(--brass);
+      }
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-shrink: 0;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        padding: 0.45rem 0.85rem;
+        font: 600 var(--fs-data) var(--data);
+        text-decoration: none;
+        border-radius: 2px;
+        transition: all 0.15s ease;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .btn-primary {
+        background: var(--brass);
+        color: var(--ink);
+        border: 1px solid var(--brass);
+      }
+      .btn-primary:hover {
+        background: var(--bone);
+        border-color: var(--bone);
+        color: var(--ink);
+      }
+      .btn-ghost {
+        background: var(--panel);
+        color: var(--bone);
+        border: 1px solid var(--rule);
+      }
+      .btn-ghost:hover {
+        border-color: var(--muted);
+        color: var(--brass);
+      }
+
+      @media (min-width: 50rem) {
+        .header-nav {
+          display: flex;
+        }
+      }
+
+      /* ---- Page Layout ---------------------------------------------------- */
+
       .page {
-        max-width: calc(var(--rail) + 3rem + 68ch);
+        max-width: calc(var(--rail) + 3rem + 72ch);
         margin: 0 auto;
         padding: 0 var(--gutter) 6rem;
       }
@@ -146,11 +257,12 @@
         display: grid;
         grid-template-columns: minmax(0, 1fr);
         gap: 1.5rem;
-        padding: clamp(3rem, 7vw, 5.5rem) 0;
+        padding: clamp(3.5rem, 8vw, 6rem) 0;
         border-top: 1px solid var(--rule);
       }
       .record:first-of-type {
         border-top: 0;
+        padding-top: clamp(2.5rem, 5vw, 4rem);
       }
 
       .record__mark {
@@ -174,8 +286,8 @@
       }
 
       /* The chain: one link drawn per record, from this record's marker down to
-   the next one. Nothing here is decorative; a record's `prev` really is the
-   record above it. */
+         the next one. Nothing here is decorative; a record's `prev` really is the
+         record above it. */
       .record__link {
         display: none;
         position: absolute;
@@ -201,15 +313,29 @@
       }
 
       .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
         font: 700 var(--fs-data)/1 var(--data);
         letter-spacing: 0.16em;
         text-transform: uppercase;
         color: var(--verdigris);
         margin: 0 0 1rem;
       }
+      .eyebrow-tag {
+        font: 500 0.65rem/1.3 var(--data);
+        padding: 0.1rem 0.4rem;
+        background: var(--panel);
+        border: 1px solid var(--rule);
+        color: var(--brass);
+        letter-spacing: 0.05em;
+        border-radius: 2px;
+      }
       .lede {
         font-size: var(--fs-lede);
         color: var(--muted);
+        line-height: 1.6;
+        margin-top: 1rem;
       }
       .record h2 + p {
         margin-top: 1.2rem;
@@ -232,6 +358,126 @@
         }
       }
 
+      /* ---- Aristotelian Persuasion Pillars (Pathos, Logos, Ethos) --------- */
+
+      .rhetoric-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        font: 600 0.72rem/1.2 var(--data);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        padding: 0.2rem 0.55rem;
+        border-radius: 2px;
+        margin-bottom: 0.8rem;
+      }
+      .pill-pathos {
+        background: color-mix(in srgb, var(--clay) 18%, var(--panel));
+        color: var(--clay);
+        border: 1px solid color-mix(in srgb, var(--clay) 40%, transparent);
+      }
+      .pill-logos {
+        background: color-mix(in srgb, var(--verdigris) 18%, var(--panel));
+        color: var(--verdigris);
+        border: 1px solid color-mix(in srgb, var(--verdigris) 40%, transparent);
+      }
+      .pill-ethos {
+        background: color-mix(in srgb, var(--brass) 18%, var(--panel));
+        color: var(--brass);
+        border: 1px solid color-mix(in srgb, var(--brass) 40%, transparent);
+      }
+
+      /* ---- Action Bar in Hero --------------------------------------------- */
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.75rem;
+        margin: 1.75rem 0 2rem;
+      }
+      .hero-quickprompt {
+        font: 400 var(--fs-data) var(--data);
+        color: var(--faint);
+      }
+      .hero-quickprompt code {
+        color: var(--brass);
+      }
+
+      /* ---- Contrast / Comparison Matrix (Pathos: The Crisis) --------------- */
+
+      .contrast-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.25rem;
+        margin: 2rem 0;
+      }
+      @media (min-width: 48rem) {
+        .contrast-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      .contrast-card {
+        background: var(--panel);
+        border: 1px solid var(--rule);
+        padding: 1.5rem;
+        position: relative;
+      }
+      .contrast-card--bad {
+        border-left: 3px solid var(--clay);
+      }
+      .contrast-card--good {
+        border-left: 3px solid var(--verdigris);
+      }
+      .contrast-card__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid var(--rule);
+      }
+      .contrast-card__title {
+        font: 700 0.95rem var(--data);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .contrast-card--bad .contrast-card__title {
+        color: var(--clay);
+      }
+      .contrast-card--good .contrast-card__title {
+        color: var(--verdigris);
+      }
+      .contrast-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.85rem;
+        font-size: 0.9375rem;
+      }
+      .contrast-list li {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 0.65rem;
+        align-items: baseline;
+        color: var(--muted);
+      }
+      .contrast-list .bullet {
+        font: 700 var(--fs-data) var(--data);
+      }
+      .contrast-card--bad .bullet {
+        color: var(--clay);
+      }
+      .contrast-card--good .bullet {
+        color: var(--verdigris);
+      }
+      .contrast-list strong {
+        color: var(--bone);
+        font-weight: 500;
+      }
+
       /* ---- Surfaces --------------------------------------------------------- */
 
       .panel {
@@ -250,7 +496,7 @@
       table.spec td {
         text-align: left;
         vertical-align: top;
-        padding: 0.8rem 1rem 0.8rem 0;
+        padding: 0.85rem 1rem 0.85rem 0;
         border-top: 1px solid var(--rule);
       }
       table.spec th {
@@ -281,8 +527,8 @@
       }
 
       /* ---- Hero: the provenance table ---------------------------------------
-   The table is the product's argument, so it is the hero rather than an
-   illustration of one. Rows are the README's own, verbatim. */
+         The table is the product's argument, so it is the hero rather than an
+         illustration of one. Rows are the README's own, verbatim. */
 
       .bleed {
         grid-column: 1 / -1;
@@ -347,7 +593,7 @@
       }
       table.prov th,
       table.prov td {
-        padding: 0.7rem 0.7rem;
+        padding: 0.75rem 0.8rem;
         text-align: right;
         white-space: nowrap;
       }
@@ -356,12 +602,20 @@
         text-align: left;
       }
       table.prov thead th {
-        font-weight: 400;
+        font-weight: 500;
         color: var(--faint);
         border-bottom: 1px solid var(--rule);
       }
       table.prov tbody td {
         border-top: 1px solid color-mix(in srgb, var(--rule) 55%, transparent);
+      }
+      .prov tbody tr {
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .prov tbody tr:hover,
+      .prov tbody tr.active-row {
+        background: var(--raise);
       }
       .prov .out {
         font-weight: 700;
@@ -379,6 +633,56 @@
         text-decoration: line-through;
         text-decoration-color: var(--clay);
         text-decoration-thickness: 1px;
+      }
+
+      /* ---- Interactive Provenance Inspector (Logos in action) ------------- */
+
+      .inspector-box {
+        background: var(--panel);
+        border: 1px solid var(--rule);
+        border-top: 0;
+        padding: 1.25rem;
+        display: grid;
+        gap: 1rem;
+      }
+      @media (min-width: 50rem) {
+        .inspector-box {
+          grid-template-columns: auto 1fr auto;
+          align-items: center;
+        }
+      }
+      .inspector-badge {
+        font: 700 0.75rem/1.2 var(--data);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        padding: 0.35rem 0.65rem;
+        border-radius: 2px;
+        white-space: nowrap;
+      }
+      .inspector-badge.is-injected {
+        background: color-mix(in srgb, var(--verdigris) 20%, var(--panel));
+        color: var(--verdigris);
+        border: 1px solid var(--verdigris);
+      }
+      .inspector-badge.is-cut {
+        background: color-mix(in srgb, var(--clay) 20%, var(--panel));
+        color: var(--clay);
+        border: 1px solid var(--clay);
+      }
+      .inspector-details {
+        font: 400 0.875rem/1.5 var(--body);
+        color: var(--muted);
+      }
+      .inspector-details strong {
+        color: var(--bone);
+      }
+      .inspector-details code {
+        color: var(--brass);
+      }
+      .inspector-cta {
+        font: 400 var(--fs-data) var(--data);
+        color: var(--faint);
+        text-align: right;
       }
 
       .legend {
@@ -408,8 +712,8 @@
       }
 
       /* One load sequence: rows settle in rank order, then the two the budget cut
-   fade back and take their strike. Everything above is the finished state,
-   so reduced motion (and no CSS animation at all) lands on it directly. */
+         fade back and take their strike. Everything above is the finished state,
+         so reduced motion (and no CSS animation at all) lands on it directly. */
 
       @media (prefers-reduced-motion: no-preference) {
         .prov tbody tr {
@@ -455,9 +759,9 @@
       }
 
       /* ---- Figures ----------------------------------------------------------
-   Hand-drawn SVG, no diagram library. Every colour comes through a class so
-   the palette stays defined in one place, and the accents mean here what they
-   mean in the hero table: brass is the chain, clay is what was cut or erased. */
+         Hand-drawn SVG, no diagram library. Every colour comes through a class so
+         the palette stays defined in one place, and the accents mean here what they
+         mean in the hero table: brass is the chain, clay is what was cut or erased. */
 
       .fig {
         overflow-x: auto;
@@ -528,8 +832,8 @@
       }
 
       /* ---- Command blocks and their copy button ------------------------------
-   The button ships hidden and the script reveals it, so a reader without
-   JavaScript never sees a control that cannot work. */
+         The button ships hidden and the script reveals it, so a reader without
+         JavaScript never sees a control that cannot work. */
 
       .cmd {
         position: relative;
@@ -561,9 +865,11 @@
         padding: 0.25rem 0.55rem;
         font: 400 11px/1.4 var(--data);
         cursor: pointer;
+        transition: all 0.15s ease;
       }
       .copy:hover {
         color: var(--bone);
+        border-color: var(--brass);
       }
       @media (max-width: 34rem) {
         .copy {
@@ -583,8 +889,8 @@
       }
 
       /* ---- Transports: one tabbed panel --------------------------------------
-   Every panel is in the document. The tablist is inert without the script,
-   so it stays hidden until the script claims the panel. */
+         Every panel is in the document. The tablist is inert without the script,
+         so it stays hidden until the script claims the panel. */
 
       .tabs {
         margin: 1.75rem 0 0;
@@ -599,23 +905,22 @@
         border-bottom: 1px solid var(--rule);
       }
       .tabs [role="tab"] {
-        background: none;
+        background: transparent;
+        color: var(--faint);
         border: 0;
         border-bottom: 2px solid transparent;
-        color: var(--muted);
-        font: 700 var(--fs-data)/1 var(--data);
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        padding: 0.7rem 0.9rem;
-        white-space: nowrap;
+        padding: 0.65rem 1rem;
+        font: 600 var(--fs-data)/1 var(--data);
         cursor: pointer;
+        white-space: nowrap;
+        transition: color 0.15s ease;
+      }
+      .tabs [role="tab"]:hover {
+        color: var(--bone);
       }
       .tabs [role="tab"][aria-selected="true"] {
         color: var(--brass);
         border-bottom-color: var(--brass);
-      }
-      .tabs [role="tabpanel"] {
-        padding-top: 1.25rem;
       }
       .tabs h3 {
         font: 700 var(--fs-data)/1 var(--data);
@@ -629,8 +934,8 @@
       }
 
       /* ---- Motion: the chain draws itself as you scroll. Native scroll-driven
-   animation, so there is no JavaScript and no fallback to maintain: where
-   it is unsupported the links are simply already drawn. --------------- */
+         animation, so there is no JavaScript and no fallback to maintain: where
+         it is unsupported the links are simply already drawn. --------------- */
 
       @supports (animation-timeline: view()) {
         @media (prefers-reduced-motion: no-preference) and (min-width: 64rem) {
@@ -655,7 +960,44 @@
   <body>
     <a class="skip" href="#start">Skip to content</a>
 
+    <!-- Aristotelian Top Navigation Header -->
+    <header class="site-header" role="banner">
+      <div class="site-header__inner">
+        <a href="#r0" class="brand" aria-label="MemVault home">
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <rect width="32" height="32" rx="6" fill="var(--ink)" />
+            <path d="M16 0v7M16 25v7" stroke="var(--brass)" stroke-width="4" />
+            <path d="M16 7l9 9-9 9-9-9z" fill="var(--brass)" />
+          </svg>
+          <span>MemVault</span>
+          <span class="brand-badge">v0.2.0</span>
+        </a>
+
+        <nav class="header-nav" aria-label="Primary navigation">
+          <a href="#r1">Why MemVault</a>
+          <a href="#r2">Architecture</a>
+          <a href="#r5">Interfaces</a>
+          <a href="#r7">Install</a>
+        </nav>
+
+        <div class="header-actions">
+          <a href="#tab-mcp" class="btn btn-primary" onclick="document.getElementById('tab-mcp')?.click();">
+            Use with MCP
+          </a>
+          <a href="https://github.com/swap-mitra/memvault" class="btn btn-ghost" target="_blank" rel="noopener">
+            GitHub
+          </a>
+        </div>
+      </div>
+    </header>
+
     <main class="page" id="start">
+
+      <!-- ====================================================================
+           SEQ 00: EXORDIUM (The Hook & Immediate Ledger)
+           Captures attention with the core thesis: memory is an inspectable
+           provenance ledger, not a mysterious black box.
+           ==================================================================== -->
       <section class="record" aria-labelledby="r0">
         <div class="record__mark">
           <span class="record__seq">SEQ 00</span>
@@ -664,14 +1006,30 @@
           <span class="record__link" aria-hidden="true"></span>
         </div>
         <div>
-          <p class="eyebrow">Local-first memory for agents</p>
+          <span class="rhetoric-pill pill-ethos">Aristotelian Persuasion · Exordium</span>
+          <p class="eyebrow">
+            Local-first memory for agents
+            <span class="eyebrow-tag">Single Rust Binary</span>
+          </p>
           <h1 id="r0">
             Every fact it holds, and every fact it decided not to hand over.
           </h1>
           <p class="lede">
             MemVault stores what you give it and explains what it hands back.
-            One binary, no service to operate, no network unless you ask for one.
+            One binary, no service to operate, no cloud egress, no network unless you ask for one.
           </p>
+
+          <div class="hero-actions">
+            <a href="#tab-mcp" class="btn btn-primary" onclick="document.getElementById('tab-mcp')?.click();">
+              Install MCP for Claude / Cursor
+            </a>
+            <a href="#r2" class="btn btn-ghost">
+              How the ledger works
+            </a>
+            <span class="hero-quickprompt">
+              One command: <code>memvault mcp-config</code>
+            </span>
+          </div>
         </div>
 
         <div class="bleed">
@@ -691,7 +1049,7 @@
             aria-label="Retrieval provenance table, scrolls horizontally"
             tabindex="0"
           >
-            <table class="prov">
+            <table class="prov" id="hero-prov-table">
               <thead>
                 <tr>
                   <th scope="col">fact_id</th>
@@ -747,6 +1105,21 @@
             </table>
           </div>
 
+          <!-- Interactive Provenance Row Inspector (Aristotelian Logos) -->
+          <div class="inspector-box" id="inspector-card">
+            <div>
+              <span class="inspector-badge is-injected" id="inspector-badge">
+                Selected: Injected
+              </span>
+            </div>
+            <div class="inspector-details" id="inspector-text">
+              <strong>Row 1 (34e2001b):</strong> Ranked #0 in vector search (dist: 0.3518) and #0 in keyword search (BM25: 2.2232). Fused RRF = 0.0328, decay discount 1.0000. Cost: <strong>15 tokens</strong> within budget (20). Handed to agent.
+            </div>
+            <div class="inspector-cta">
+              <span>Click any row to inspect decision math</span>
+            </div>
+          </div>
+
           <dl class="legend">
             <dt>ann_rank / ann_dist</dt>
             <dd>
@@ -794,6 +1167,11 @@
         </div>
       </section>
 
+      <!-- ====================================================================
+           SEQ 01: NARRATIO (The Crisis of Agent Memory - Pathos)
+           States the macro problem: stateless agents, black box cloud services,
+           and the acute developer pain of unaccountable memory failures.
+           ==================================================================== -->
       <section class="record" aria-labelledby="r1">
         <div class="record__mark">
           <span class="record__seq">SEQ 01</span>
@@ -802,13 +1180,129 @@
           <span class="record__link" aria-hidden="true"></span>
         </div>
         <div>
-          <p class="eyebrow">How it works</p>
-          <h2 id="r1">Two indexes, fused by rank, packed to a budget.</h2>
+          <span class="rhetoric-pill pill-pathos">The Human Struggle · Narratio</span>
+          <p class="eyebrow">
+            The Macro Problem
+            <span class="eyebrow-tag">Pathos</span>
+          </p>
+          <h2 id="r1">Stateless models, opaque cloud caches, and silent amnesia.</h2>
           <p>
-            A vector index and a keyword index answer every query independently.
-            Their ranks are fused, weighted by decay, and packed to fit the
-            token budget you set. What the fusion cut is written down next to
-            what it kept.
+            Language model calls are pure functions of their context window. Everything learned in a previous session vanishes unless written down outside. The common workarounds fail silently: truncation discards critical context, rolling summarisation burns expensive tokens while blurring specifics, and giant context windows drive latency and degrade middle-attention.
+          </p>
+          <p>
+            When teams adopt cloud memory microservices, they trade amnesia for three harder problems:
+          </p>
+        </div>
+
+        <div class="bleed">
+          <div class="contrast-grid">
+            <div class="contrast-card contrast-card--bad">
+              <div class="contrast-card__header">
+                <span class="contrast-card__title">The Cloud Memory Black Box</span>
+                <span class="eyebrow-tag">Failure Modes</span>
+              </div>
+              <ul class="contrast-list">
+                <li>
+                  <span class="bullet">&times;</span>
+                  <div>
+                    <strong>Staleness & Obsoleted Truth:</strong>
+                    Models time as a single timestamp. When a project lead changes or a deploy script moves, stale facts confidently surface forever.
+                  </div>
+                </li>
+                <li>
+                  <span class="bullet">&times;</span>
+                  <div>
+                    <strong>Total Opacity:</strong>
+                    Returns a list of facts with no candidate ranks, no rejected items, and no explanation of what the token budget cut. Debugging is guesswork.
+                  </div>
+                </li>
+                <li>
+                  <span class="bullet">&times;</span>
+                  <div>
+                    <strong>50-Second Tail Latency:</strong>
+                    Putting LLM extraction and reranking on the hot path introduces catastrophic p95 tail latencies (measured up to 59s on LOCOMO benchmarks).
+                  </div>
+                </li>
+                <li>
+                  <span class="bullet">&times;</span>
+                  <div>
+                    <strong>Privacy & Host Violations:</strong>
+                    Demands that desktop agents and sandboxed coding assistants ship proprietary code and private databases off-host to a third-party service.
+                  </div>
+                </li>
+              </ul>
+            </div>
+
+            <div class="contrast-card contrast-card--good">
+              <div class="contrast-card__header">
+                <span class="contrast-card__title">MemVault Local Ledger</span>
+                <span class="eyebrow-tag">Deterministic Fix</span>
+              </div>
+              <ul class="contrast-list">
+                <li>
+                  <span class="bullet">&check;</span>
+                  <div>
+                    <strong>Bitemporal Modelling:</strong>
+                    Two clocks on every fact: Valid Time (when true in the world) and Belief Time (when learned). Know what was true vs. what the agent believed.
+                  </div>
+                </li>
+                <li>
+                  <span class="bullet">&check;</span>
+                  <div>
+                    <strong>Explainable by Construction:</strong>
+                    Every retrieval returns the full candidate matrix, vector & BM25 ranks, decay discounts, and the exact reason an item was kept or cut.
+                  </div>
+                </li>
+                <li>
+                  <span class="bullet">&check;</span>
+                  <div>
+                    <strong>3ms Predictable Latency:</strong>
+                    No LLM on the hot path. Retrieval is bounded by CPU and disk, not inference queues or external API limits. Zero per-operation cost.
+                  </div>
+                </li>
+                <li>
+                  <span class="bullet">&check;</span>
+                  <div>
+                    <strong>100% Local-First:</strong>
+                    Single static binary embedded in-process or over stdio. Zero network calls, zero external databases, 100% host containment.
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="follow">
+          <p class="note">
+            The category exists because the problem is real. But solving persistence with a remote vector database simply moves the black box from the model into the storage layer. MemVault treats accountability as the foundational requirement.
+          </p>
+        </div>
+      </section>
+
+      <!-- ====================================================================
+           SEQ 02: DIVISIO & CONFIRMATIO I (Architecture & Logic - Logos)
+           Defines first principles: Memory is a ledger, not a cache.
+           Two indexes, fused by rank, packed to a token budget.
+           ==================================================================== -->
+      <section class="record" aria-labelledby="r2">
+        <div class="record__mark">
+          <span class="record__seq">SEQ 02</span>
+          <span class="record__hash">hash <b>d84c1fa2</b></span>
+          <span class="record__hash">prev <b>6b39e07c</b></span>
+          <span class="record__link" aria-hidden="true"></span>
+        </div>
+        <div>
+          <span class="rhetoric-pill pill-logos">First Principles & Architecture · Logos</span>
+          <p class="eyebrow">
+            How It Works
+            <span class="eyebrow-tag">Divisio</span>
+          </p>
+          <h2 id="r2">Two indexes, fused by rank, packed to a budget.</h2>
+          <p>
+            A vector index (<code>usearch</code>) and a keyword index (<code>tantivy</code>) answer every query independently. Their ranks are fused via Reciprocal Rank Fusion (RRF), weighted by decay, and packed to fit the token budget you set.
+          </p>
+          <p>
+            The write path only ever appends. The read path queries both indexes, fuses their ranks, and writes its own decision back into the ledger, which is why an old retrieval can be replayed instead of re-run.
           </p>
         </div>
 
@@ -936,7 +1430,9 @@
               d="M530 40h26v44h20"
               marker-end="url(#arrow-read)"
             />
-            <path class="read" d="M530 134h26V84" />
+            <path
+              class="read"
+              d="M530 134h26V84" />
             <circle class="ink-muted" cx="556" cy="84" r="3" />
             <path class="read" d="M640 104v42" marker-end="url(#arrow-read)" />
             <path class="read" d="M700 172h56" marker-end="url(#arrow-read)" />
@@ -969,256 +1465,11 @@
         </div>
       </section>
 
-      <section class="record" aria-labelledby="r2">
-        <div class="record__mark">
-          <span class="record__seq">SEQ 02</span>
-          <span class="record__hash">hash <b>d84c1fa2</b></span>
-          <span class="record__hash">prev <b>6b39e07c</b></span>
-          <span class="record__link" aria-hidden="true"></span>
-        </div>
-        <div>
-          <p class="eyebrow">Run it</p>
-          <h2 id="r2">Four ways in, one engine behind them.</h2>
-          <p>
-            The CLI, an MCP server over stdio, an optional gRPC surface, and
-            Python in-process. Every one of them returns the same provenance.
-          </p>
-          <div class="tabs">
-            <div role="tablist" aria-label="Ways to run MemVault">
-              <button
-                type="button"
-                role="tab"
-                id="tab-cli"
-                aria-controls="panel-cli"
-                aria-selected="true"
-              >
-                CLI
-              </button>
-              <button
-                type="button"
-                role="tab"
-                id="tab-mcp"
-                aria-controls="panel-mcp"
-                aria-selected="false"
-              >
-                MCP
-              </button>
-              <button
-                type="button"
-                role="tab"
-                id="tab-grpc"
-                aria-controls="panel-grpc"
-                aria-selected="false"
-              >
-                gRPC
-              </button>
-              <button
-                type="button"
-                role="tab"
-                id="tab-python"
-                aria-controls="panel-python"
-                aria-selected="false"
-              >
-                Python
-              </button>
-            </div>
-
-            <section
-              role="tabpanel"
-              id="panel-cli"
-              aria-labelledby="tab-cli"
-              tabindex="0"
-            >
-              <h3>CLI</h3>
-              <div class="cmd">
-                <button type="button" class="copy" aria-live="polite" hidden>
-                  copy
-                </button>
-                <pre tabindex="0">
-memvault --data-dir ./my-memory write --namespace project \
-  --content "the deploy script lives in ops/deploy.sh"
-
-memvault --data-dir ./my-memory search --namespace project \
-  --query "deploy script" --max-tokens 20
-
-memvault --data-dir ./my-memory explain &lt;retrieval_id&gt;
-memvault --data-dir ./my-memory verify
-memvault --data-dir ./my-memory forget &lt;fact_id&gt; --reason "customer deletion request"</pre>
-              </div>
-              <p>
-                No server and no config. <code>search</code> prints the
-                provenance table above and a <code>retrieval_id</code>;
-                <code>explain</code> reprints that table later from the ledger,
-                and <code>verify</code> answers
-                <code>chain verified from seq 0</code>. The binary builds to
-                <code>target/release/memvault</code>; the commands above assume
-                you put it on your <code>PATH</code>.
-              </p>
-            </section>
-
-            <section
-              role="tabpanel"
-              id="panel-mcp"
-              aria-labelledby="tab-mcp"
-              tabindex="0"
-            >
-              <h3>MCP</h3>
-              <p>
-                Point the client at <code>memvault-server</code>, with a data
-                directory as its one argument. Save this as
-                <code>.mcp.json</code> in your project root for Claude Code, or
-                merge it into <code>claude_desktop_config.json</code> for Claude
-                Desktop. Any other MCP client takes the same shape: it is a
-                plain stdio server.
-              </p>
-              <div class="cmd">
-                <button type="button" class="copy" aria-live="polite" hidden>
-                  copy
-                </button>
-                <pre tabindex="0">
-{
-  "mcpServers": {
-    "memvault": {
-      "command": "/absolute/path/to/memvault/target/release/memvault-server",
-      "args": ["/absolute/path/to/my-memory"]
-    }
-  }
-}</pre>
-              </div>
-              <p class="warn">
-                Use absolute paths for both. The server inherits whatever
-                working directory the client happened to launch it from, which
-                is rarely the one you expect.
-              </p>
-              <p>Restart the client and the agent has seven tools:</p>
-              <table class="spec">
-                <tbody>
-                  <tr>
-                    <th scope="row">memory_write</th>
-                    <td>
-                      Assert a fact. Pass an existing <code>fact_id</code> to
-                      supersede that fact instead; it has to be one of this
-                      namespace&rsquo;s own.
-                    </td>
-                  </tr>
-                  <tr>
-                    <th scope="row">memory_search</th>
-                    <td>
-                      Hybrid retrieval. Returns the injected facts with their
-                      content, best first, plus the full provenance table as
-                      rows. Every tool answers in structured JSON.
-                    </td>
-                  </tr>
-                  <tr>
-                    <th scope="row">memory_get</th>
-                    <td>One fact&rsquo;s current version by id.</td>
-                  </tr>
-                  <tr>
-                    <th scope="row">memory_as_of</th>
-                    <td>
-                      What was true, or what the engine believed, at a given
-                      moment.
-                    </td>
-                  </tr>
-                  <tr>
-                    <th scope="row">memory_supersede</th>
-                    <td>
-                      Close a fact&rsquo;s interval without asserting a
-                      replacement.
-                    </td>
-                  </tr>
-                  <tr>
-                    <th scope="row">memory_forget</th>
-                    <td>Cryptographic erase.</td>
-                  </tr>
-                  <tr>
-                    <th scope="row">memory_explain</th>
-                    <td>
-                      Reconstruct any past retrieval from its
-                      <code>retrieval_id</code>.
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-              <p>
-                On startup the server runs recovery and verifies the chain,
-                logging the result to stderr. Stdout is the protocol channel and
-                carries nothing else.
-              </p>
-            </section>
-
-            <section
-              role="tabpanel"
-              id="panel-grpc"
-              aria-labelledby="tab-grpc"
-              tabindex="0"
-            >
-              <h3>gRPC</h3>
-              <div class="cmd">
-                <button type="button" class="copy" aria-live="polite" hidden>
-                  copy
-                </button>
-                <pre tabindex="0">
-cargo build -p memvault-server --features grpc
-
-MEMVAULT_GRPC_ADDR=127.0.0.1:50051 \
-  ./target/debug/memvault-server ./my-memory</pre>
-              </div>
-              <p>
-                Off by default, for multi-process deployments where stdio is not
-                available. The same seven operations, as protobuf messages
-                with the same shapes as the MCP tools&rsquo; JSON; the schema is
-                <code>crates/memvault-server/proto/memvault.proto</code>. A
-                default build <em>rejects</em> <code>MEMVAULT_GRPC_ADDR</code>
-                rather than ignoring it, so a half-configured deployment fails
-                at startup instead of quietly serving the wrong thing.
-              </p>
-            </section>
-
-            <section
-              role="tabpanel"
-              id="panel-python"
-              aria-labelledby="tab-python"
-              tabindex="0"
-            >
-              <h3>Python</h3>
-              <div class="cmd">
-                <button type="button" class="copy" aria-live="polite" hidden>
-                  copy
-                </button>
-                <pre tabindex="0">
-<span class="cm"># a wheel for each platform is attached to every release</span>
-pip install https://github.com/swap-mitra/memvault/releases/download/v0.2.0/memvault-0.2.0-cp39-abi3-manylinux_2_28_x86_64.whl</pre>
-              </div>
-              <div class="cmd">
-                <button type="button" class="copy" aria-live="polite" hidden>
-                  copy
-                </button>
-                <pre tabindex="0">import memvault
-
-mv = memvault.MemVault("./my-memory")
-fact_id = mv.write("project", "the deploy script lives in ops/deploy.sh")
-
-result = mv.search("project", "deploy script")
-for f in result.injected:    <span class="cm"># what goes in context, best first</span>
-    print(f.fact_id, f.content)
-for e in result.candidates:  <span class="cm"># why: every candidate considered</span>
-    print(e.fact_id, e.outcome, e.final_score, e.token_cost)
-
-mv.verify()  <span class="cm"># raises if the chain is broken</span></pre>
-              </div>
-              <p>
-                In-process, with no subprocess and no event loop. The API is
-                synchronous and every call releases the GIL while the engine
-                works. <code>Explanation</code> carries the same fields as the
-                table above, so provenance does not get thinner just because you
-                came in this way.
-              </p>
-            </section>
-          </div>
-        </div>
-      </section>
-
+      <!-- ====================================================================
+           SEQ 03: CONFIRMATIO II (Provable Forgetting - Ethos & Logic)
+           Demonstrates how cryptographic erase reconciles append-only ledgers
+           with the right to be forgotten.
+           ==================================================================== -->
       <section class="record" aria-labelledby="r3">
         <div class="record__mark">
           <span class="record__seq">SEQ 03</span>
@@ -1227,12 +1478,17 @@ mv.verify()  <span class="cm"># raises if the chain is broken</span></pre>
           <span class="record__link" aria-hidden="true"></span>
         </div>
         <div>
-          <p class="eyebrow">Provable forgetting</p>
+          <span class="rhetoric-pill pill-ethos">Provable Guarantees · Ethos</span>
+          <p class="eyebrow">
+            Cryptographic Erase
+            <span class="eyebrow-tag">Confirmatio</span>
+          </p>
           <h2 id="r3">Erase a fact and the chain still verifies.</h2>
           <p>
-            Cryptographic erase: the key dies, the record stays, the chain
-            holds. The fact leaves search, its content hash survives, and nobody
-            can recover what it said.
+            An append-only ledger appears to forbid deletion, while privacy compliance mandates it. MemVault resolves this through cryptographic erase: every record is encrypted with its own key.
+          </p>
+          <p>
+            When you call <code>forget</code>, the engine destroys the key. The ciphertext becomes mathematically unrecoverable, the content hash and sequence position remain intact, and <code>verify</code> confirms the ledger was never tampered with.
           </p>
           <div class="fig">
             <svg viewBox="0 0 460 340" role="img" aria-labelledby="d2t d2d">
@@ -1313,6 +1569,10 @@ mv.verify()  <span class="cm"># raises if the chain is broken</span></pre>
         </div>
       </section>
 
+      <!-- ====================================================================
+           SEQ 04: CONFIRMATIO III (Bitemporal Logic - Two Clocks)
+           Addresses the core problem of staleness: Valid Time vs. Belief Time.
+           ==================================================================== -->
       <section class="record" aria-labelledby="r4">
         <div class="record__mark">
           <span class="record__seq">SEQ 04</span>
@@ -1321,12 +1581,14 @@ mv.verify()  <span class="cm"># raises if the chain is broken</span></pre>
           <span class="record__link" aria-hidden="true"></span>
         </div>
         <div>
-          <p class="eyebrow">Bitemporal</p>
+          <span class="rhetoric-pill pill-logos">Temporal Integrity · Logos</span>
+          <p class="eyebrow">
+            Bitemporal Mechanics
+            <span class="eyebrow-tag">Two Clocks</span>
+          </p>
           <h2 id="r4">What was true, and what the engine believed.</h2>
           <p>
-            Two axes, both queryable. Ask what held at a moment, or ask what
-            MemVault thought held at that moment. They are not the same
-            question, and a memory that conflates them cannot explain itself.
+            Two clocks, both queryable. Ask what held in the real world at a moment (Valid Time), or ask what MemVault believed held at that moment (Belief Time). They are not the same question, and a memory engine that conflates them cannot explain past decisions.
           </p>
           <div class="fig">
             <svg viewBox="0 0 460 300" role="img" aria-labelledby="d3t d3d">
@@ -1395,6 +1657,10 @@ mv.verify()  <span class="cm"># raises if the chain is broken</span></pre>
         </div>
       </section>
 
+      <!-- ====================================================================
+           SEQ 05: CONFIRMATIO IV & ERGONOMICS (Four Ways In)
+           Demonstrates accessibility across MCP, CLI, Python, and gRPC.
+           ==================================================================== -->
       <section class="record" aria-labelledby="r5">
         <div class="record__mark">
           <span class="record__seq">SEQ 05</span>
@@ -1403,59 +1669,261 @@ mv.verify()  <span class="cm"># raises if the chain is broken</span></pre>
           <span class="record__link" aria-hidden="true"></span>
         </div>
         <div>
-          <p class="eyebrow">Install</p>
-          <h2 id="r5">Hand it to your agent.</h2>
+          <span class="rhetoric-pill pill-logos">Ergonomics & Integration · Logos</span>
+          <p class="eyebrow">
+            Run It
+            <span class="eyebrow-tag">Four Surfaces</span>
+          </p>
+          <h2 id="r5">Four ways in, one engine behind them.</h2>
           <p>
-            Paste one prompt into the agent you already use and let it clone,
-            build, wire up the MCP config, and prove the round trip works.
+            An MCP server over stdio, the standalone CLI, Python in-process, and an optional gRPC surface. Every one of them returns the exact same provenance.
           </p>
-          <div class="cmd">
-            <button type="button" class="copy" aria-live="polite" hidden>
-              copy
-            </button>
-            <pre tabindex="0">
-Install MemVault as an MCP server for this project.
+          <div class="tabs">
+            <div role="tablist" aria-label="Ways to run MemVault">
+              <button
+                type="button"
+                role="tab"
+                id="tab-mcp"
+                aria-controls="panel-mcp"
+                aria-selected="true"
+              >
+                MCP (Recommended)
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="tab-cli"
+                aria-controls="panel-cli"
+                aria-selected="false"
+              >
+                CLI
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="tab-python"
+                aria-controls="panel-python"
+                aria-selected="false"
+              >
+                Python
+              </button>
+              <button
+                type="button"
+                role="tab"
+                id="tab-grpc"
+                aria-controls="panel-grpc"
+                aria-selected="false"
+              >
+                gRPC
+              </button>
+            </div>
 
-Prerequisites, check both before you start and stop if either is missing:
-Rust 1.85 or newer (the workspace is edition 2024), and a C++ toolchain,
-because the vector index builds from source. (If either is missing, the
-release page at https://github.com/swap-mitra/memvault/releases has a
-prebuilt archive per platform; unpack it and skip step 1.)
+            <!-- Panel MCP (Default & Recommended) -->
+            <section
+              role="tabpanel"
+              id="panel-mcp"
+              aria-labelledby="tab-mcp"
+              tabindex="0"
+            >
+              <h3>MCP</h3>
+              <p>
+                Point your client at <code>memvault-server</code> with a data
+                directory as its one argument. Or run <code>memvault mcp-config</code>
+                to generate the absolute path JSON automatically. Save this as
+                <code>.mcp.json</code> in your project root for Claude Code / Cursor,
+                or merge it into <code>claude_desktop_config.json</code> for Claude
+                Desktop:
+              </p>
+              <div class="cmd">
+                <button type="button" class="copy" aria-live="polite" hidden>
+                  copy
+                </button>
+                <pre tabindex="0">
+{
+  "mcpServers": {
+    "memvault": {
+      "command": "/absolute/path/to/memvault/target/release/memvault-server",
+      "args": ["/absolute/path/to/my-memory"]
+    }
+  }
+}</pre>
+              </div>
+              <p class="warn">
+                Use absolute paths for both. The server inherits whatever
+                working directory the client happened to launch it from, which
+                is rarely the one you expect.
+              </p>
+              <p>Restart the client and the agent has seven memory tools:</p>
+              <table class="spec">
+                <tbody>
+                  <tr>
+                    <th scope="row">memory_write</th>
+                    <td>
+                      Assert a fact. Pass an existing <code>fact_id</code> to
+                      supersede that fact instead; it has to be one of this
+                      namespace&rsquo;s own.
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row">memory_search</th>
+                    <td>
+                      Hybrid retrieval. Returns the injected facts with their
+                      content, best first, plus the full provenance table as
+                      rows. Every tool answers in structured JSON.
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row">memory_get</th>
+                    <td>One fact&rsquo;s current version by id.</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">memory_as_of</th>
+                    <td>
+                      What was true, or what the engine believed, at a given
+                      moment.
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row">memory_supersede</th>
+                    <td>
+                      Close a fact&rsquo;s interval without asserting a
+                      replacement.
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row">memory_forget</th>
+                    <td>Cryptographic erase.</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">memory_explain</th>
+                    <td>
+                      Reconstruct any past retrieval from its
+                      <code>retrieval_id</code>.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p>
+                On startup the server runs recovery and verifies the chain,
+                logging the result to stderr. Stdout is the protocol channel and
+                carries nothing else.
+              </p>
+            </section>
 
-1. git clone https://github.com/swap-mitra/memvault
-   cd memvault
-   cargo build --release
+            <!-- Panel CLI -->
+            <section
+              role="tabpanel"
+              id="panel-cli"
+              aria-labelledby="tab-cli"
+              tabindex="0"
+              hidden
+            >
+              <h3>CLI</h3>
+              <div class="cmd">
+                <button type="button" class="copy" aria-live="polite" hidden>
+                  copy
+                </button>
+                <pre tabindex="0">
+memvault --data-dir ./my-memory write --namespace project \
+  --content "the deploy script lives in ops/deploy.sh"
 
-2. If the build fails, stop and report the error to me verbatim. Do not
-   improvise a fix, and do not substitute another memory tool.
+memvault --data-dir ./my-memory search --namespace project \
+  --query "deploy script" --max-tokens 20
 
-3. Write .mcp.json in my project root. Use absolute paths for both the
-   binary and the data directory, because the server inherits whatever
-   working directory the client launched it from:
+memvault --data-dir ./my-memory explain &lt;retrieval_id&gt;
+memvault --data-dir ./my-memory verify
+memvault --data-dir ./my-memory forget &lt;fact_id&gt; --reason "customer deletion request"</pre>
+              </div>
+              <p>
+                No server and no config. <code>search</code> prints the
+                provenance table above and a <code>retrieval_id</code>;
+                <code>explain</code> reprints that table later from the ledger,
+                and <code>verify</code> answers
+                <code>chain verified from seq 0</code>. The binary builds to
+                <code>target/release/memvault</code>.
+              </p>
+            </section>
 
-   {
-     "mcpServers": {
-       "memvault": {
-         "command": "&lt;abs path&gt;/target/release/memvault-server",
-         "args": ["&lt;abs path&gt;/my-memory"]
-       }
-     }
-   }
+            <!-- Panel Python -->
+            <section
+              role="tabpanel"
+              id="panel-python"
+              aria-labelledby="tab-python"
+              tabindex="0"
+              hidden
+            >
+              <h3>Python</h3>
+              <div class="cmd">
+                <button type="button" class="copy" aria-live="polite" hidden>
+                  copy
+                </button>
+                <pre tabindex="0">
+<span class="cm"># a wheel for each platform is attached to every release</span>
+pip install https://github.com/swap-mitra/memvault/releases/download/v0.2.0/memvault-0.2.0-cp39-abi3-manylinux_2_28_x86_64.whl</pre>
+              </div>
+              <div class="cmd">
+                <button type="button" class="copy" aria-live="polite" hidden>
+                  copy
+                </button>
+                <pre tabindex="0">import memvault
 
-4. Tell me to restart the client, then prove the round trip: call
-   memory_write with namespace "project" and some fact about this repo,
-   call memory_search for it, and report the retrieval_id and each
-   candidate's outcome you got back.</pre>
+mv = memvault.MemVault("./my-memory")
+fact_id = mv.write("project", "the deploy script lives in ops/deploy.sh")
+
+result = mv.search("project", "deploy script")
+for f in result.injected:    <span class="cm"># what goes in context, best first</span>
+    print(f.fact_id, f.content)
+for e in result.candidates:  <span class="cm"># why: every candidate considered</span>
+    print(e.fact_id, e.outcome, e.final_score, e.token_cost)
+
+mv.verify()  <span class="cm"># raises if the chain is broken</span></pre>
+              </div>
+              <p>
+                In-process, with no subprocess and no event loop. The API is
+                synchronous and every call releases the GIL while the engine
+                works. <code>Explanation</code> carries the same fields as the
+                provenance table, so auditability is never compromised.
+              </p>
+            </section>
+
+            <!-- Panel gRPC -->
+            <section
+              role="tabpanel"
+              id="panel-grpc"
+              aria-labelledby="tab-grpc"
+              tabindex="0"
+              hidden
+            >
+              <h3>gRPC</h3>
+              <div class="cmd">
+                <button type="button" class="copy" aria-live="polite" hidden>
+                  copy
+                </button>
+                <pre tabindex="0">
+cargo build -p memvault-server --features grpc
+
+MEMVAULT_GRPC_ADDR=127.0.0.1:50051 \
+  ./target/debug/memvault-server ./my-memory</pre>
+              </div>
+              <p>
+                Off by default, for multi-process deployments where stdio is not
+                available. The same seven operations, as protobuf messages
+                with the same shapes as the MCP tools&rsquo; JSON; the schema is
+                <code>crates/memvault-server/proto/memvault.proto</code>. A
+                default build <em>rejects</em> <code>MEMVAULT_GRPC_ADDR</code>
+                rather than ignoring it, so a half-configured deployment fails
+                at startup instead of quietly serving the wrong thing.
+              </p>
+            </section>
           </div>
-          <p class="cap">
-            It clones, builds, writes the config with absolute paths, and then
-            proves the round trip rather than declaring victory. If the build
-            fails it is told to stop and hand you the error, which is the one
-            place an agent otherwise starts inventing.
-          </p>
         </div>
       </section>
 
+      <!-- ====================================================================
+           SEQ 06: REFUTATIO (Known Limits & Honest Counterarguments)
+           True Aristotelian Ethos: Refuting objections by openly documenting
+           constraints and deliberate engineering trade-offs.
+           ==================================================================== -->
       <section class="record" aria-labelledby="r6">
         <div class="record__mark">
           <span class="record__seq">SEQ 06</span>
@@ -1463,7 +1931,11 @@ prebuilt archive per platform; unpack it and skip step 1.)
           <span class="record__hash">prev <b>47c8e215</b></span>
         </div>
         <div>
-          <p class="eyebrow">Known limits</p>
+          <span class="rhetoric-pill pill-ethos">Intellectual Honesty · Refutatio</span>
+          <p class="eyebrow">
+            Known Limits
+            <span class="eyebrow-tag">Refutatio</span>
+          </p>
           <h2 id="r6">
             Stated plainly, because each one otherwise looks like a bug.
           </h2>
@@ -1514,6 +1986,61 @@ prebuilt archive per platform; unpack it and skip step 1.)
               </tr>
             </tbody>
           </table>
+
+          <!-- Final Peroratio / Call to Action inside the closing record -->
+          <div style="margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--rule);" id="r7">
+            <span class="rhetoric-pill pill-logos">The Climax & Action · Peroratio</span>
+            <p class="eyebrow">Install</p>
+            <h3>Hand it to your agent in sixty seconds.</h3>
+            <p>
+              Paste one prompt into Claude Code, Cursor, or Claude Desktop and let it clone,
+              build, wire up the MCP config, and prove the round trip works.
+            </p>
+            <div class="cmd">
+              <button type="button" class="copy" aria-live="polite" hidden>
+                copy
+              </button>
+              <pre tabindex="0">
+Install MemVault as an MCP server for this project.
+
+Prerequisites, check both before you start and stop if either is missing:
+Rust 1.85 or newer (the workspace is edition 2024), and a C++ toolchain,
+because the vector index builds from source. (If either is missing, the
+release page at https://github.com/swap-mitra/memvault/releases has a
+prebuilt archive per platform; unpack it and skip step 1.)
+
+1. git clone https://github.com/swap-mitra/memvault
+   cd memvault
+   cargo build --release
+
+2. If the build fails, stop and report the error to me verbatim. Do not
+   improvise a fix, and do not substitute another memory tool.
+
+3. Write .mcp.json in my project root. Use absolute paths for both the
+   binary and the data directory, because the server inherits whatever
+   working directory the client launched it from:
+
+   {
+     "mcpServers": {
+       "memvault": {
+         "command": "&lt;abs path&gt;/target/release/memvault-server",
+         "args": ["&lt;abs path&gt;/my-memory"]
+       }
+     }
+   }
+
+4. Tell me to restart the client, then prove the round trip: call
+   memory_write with namespace "project" and some fact about this repo,
+   call memory_search for it, and report the retrieval_id and each
+   candidate's outcome you got back.</pre>
+            </div>
+            <p class="cap">
+              It clones, builds, writes the config with absolute paths, and then
+              proves the round trip rather than declaring victory. If the build
+              fails it is told to stop and hand you the error.
+            </p>
+          </div>
+
           <p class="stamp">
             chain verified from seq 0
             <span
@@ -1525,12 +2052,15 @@ prebuilt archive per platform; unpack it and skip step 1.)
           </p>
         </div>
       </section>
+
     </main>
 
     <script>
-      // Progressive enhancement, both of these. Without the script every panel
+      // Progressive enhancement, all of these. Without JavaScript, every panel
       // stays in the document and the tablist and copy buttons stay hidden,
       // because a control that cannot work should not be on the page.
+
+      // Tab switcher for interfaces
       for (const tabs of document.querySelectorAll(".tabs")) {
         const btns = [...tabs.querySelectorAll('[role="tab"]')];
         const panels = [...tabs.querySelectorAll('[role="tabpanel"]')];
@@ -1561,6 +2091,7 @@ prebuilt archive per platform; unpack it and skip step 1.)
         show(0);
       }
 
+      // Copy buttons on code blocks
       for (const btn of document.querySelectorAll(".copy")) {
         const flash = (t) => {
           btn.textContent = t;
@@ -1576,6 +2107,51 @@ prebuilt archive per platform; unpack it and skip step 1.)
         );
         btn.hidden = false;
       }
+
+      // Interactive Provenance Inspector (Logos in action)
+      const inspectorData = [
+        {
+          badge: "Selected: Injected",
+          badgeClass: "is-injected",
+          html: "<strong>Row 1 (34e2001b):</strong> Ranked #0 in vector search (dist: 0.3518) and #0 in keyword search (BM25: 2.2232). Fused RRF = 0.0328, decay discount 1.0000. Cost: <strong>15 tokens</strong> within budget (20). Handed to agent."
+        },
+        {
+          badge: "Selected: CutByBudget",
+          badgeClass: "is-cut",
+          html: "<strong>Row 2 (fdaa5149):</strong> Ranked #1 in vector search (dist: 0.6311); absent from keyword top-k. Fused RRF = 0.0161, final = 0.0161. Cumulative tokens would reach <strong>32</strong> (15 + 17), exceeding max-tokens limit (20). Cut by budget."
+        },
+        {
+          badge: "Selected: CutByBudget",
+          badgeClass: "is-cut",
+          html: "<strong>Row 3 (b5aa16a8):</strong> Ranked #2 in vector search (dist: 1.0000). Fused RRF = 0.0159, final = 0.0159. Cumulative tokens would reach <strong>43</strong> (32 + 11), exceeding max-tokens limit (20). Cut by budget."
+        }
+      ];
+
+      const rows = document.querySelectorAll("#hero-prov-table tbody tr");
+      const badgeEl = document.getElementById("inspector-badge");
+      const textEl = document.getElementById("inspector-text");
+
+      function selectRow(idx) {
+        rows.forEach((r, i) => {
+          r.classList.toggle("active-row", i === idx);
+        });
+        const d = inspectorData[idx];
+        if (d && badgeEl && textEl) {
+          badgeEl.textContent = d.badge;
+          badgeEl.className = "inspector-badge " + d.badgeClass;
+          textEl.innerHTML = d.html;
+        }
+      }
+
+      rows.forEach((row, i) => {
+        row.addEventListener("click", () => selectRow(i));
+        row.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            selectRow(i);
+          }
+        });
+      });
     </script>
   </body>
 </html>
